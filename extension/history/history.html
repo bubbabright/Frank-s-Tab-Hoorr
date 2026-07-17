@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Tab Hoor — History</title>
+  <link rel="stylesheet" href="history.css" />
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="logo">TAB HOOR <span>/ history</span></div>
+      <div class="ranges" id="ranges">
+        <button type="button" data-range="24h">24h</button>
+        <button type="button" data-range="7d" class="on">7d</button>
+        <button type="button" data-range="30d">30d</button>
+        <button type="button" data-range="90d">90d</button>
+        <button type="button" data-range="all">all</button>
+      </div>
+    </header>
+
+    <section class="stats" id="stats"></section>
+
+    <section class="card">
+      <div class="card-title">Open tabs over time</div>
+      <div id="chart" class="chart"></div>
+    </section>
+
+    <section class="card">
+      <div class="card-title" id="dayTitle">Day breakdown · max tabs</div>
+      <div id="dayList"></div>
+    </section>
+
+    <footer>
+      <span>Counts only. No URLs. All local.</span>
+      <div class="foot-actions">
+        <button type="button" id="btnCsv">Export CSV</button>
+        <button type="button" class="danger" id="btnClear">Clear history</button>
+      </div>
+    </footer>
+  </div>
+  <script src="../lib/browser-polyfill.min.js"></script>
+  <script src="../data.js"></script>
+  <script src="history.js"></script>
+</body>
+</html>

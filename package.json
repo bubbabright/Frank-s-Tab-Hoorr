@@ -1,0 +1,11 @@
+{
+  "name": "tab-hoor",
+  "version": "0.3.0",
+  "private": true,
+  "description": "Tab Hoor browser extension (Firefox + Chrome)",
+  "scripts": {
+    "build": "./scripts/build.sh",
+    "install:firefox": "./scripts/install-firefox.sh",
+    "install:chrome": "./scripts/install-chrome.sh"
+  }
+}

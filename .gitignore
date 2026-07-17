@@ -1,0 +1,5 @@
+node_modules/
+dist/
+*.log
+extension/chrome-key.pem
+extension/.chrome-key-b64

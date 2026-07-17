@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Tab Hoor</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div id="app">
+    <header>
+      <div class="logo">TAB HOOR</div>
+      <div class="header-actions">
+        <button type="button" class="icon-btn" id="btnHistory" title="History">◷</button>
+        <button type="button" class="icon-btn" id="btnOptions" title="Settings">⚙</button>
+      </div>
+    </header>
+
+    <section class="score-section">
+      <div class="tab-count" id="tabCount">—</div>
+      <div class="count-label">tabs open</div>
+      <div class="window-count" id="windowCount"></div>
+    </section>
+
+    <section class="rank-section">
+      <div class="rank-label">YOUR RANK</div>
+      <div class="rank-title" id="rankTitle">…</div>
+      <div class="rank-quote" id="rankQuote">…</div>
+      <div class="prog" id="rankProg" hidden>
+        <div class="prog-bar"><div class="prog-fill" id="progFill"></div></div>
+        <div class="prog-meta" id="progMeta"></div>
+      </div>
+    </section>
+
+    <section class="stats-row">
+      <div class="stat">
+        <div class="stat-value" id="allTimeHigh">—</div>
+        <div class="stat-label">all-time high</div>
+        <div class="stat-sub" id="allTimeHighDate">—</div>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat stat-spark">
+        <div class="stat-label">14-day trend</div>
+        <div id="sparkline"></div>
+      </div>
+    </section>
+
+    <section class="achievements-section">
+      <div class="section-header">
+        <span>ACHIEVEMENTS</span>
+        <span class="section-count" id="achCount"></span>
+      </div>
+      <div class="achievements-grid" id="achievementsGrid"></div>
+    </section>
+
+    <footer>
+      <div class="footer-text">feeling overwhelmed?</div>
+      <div class="footer-links">
+        <a href="#" id="lnkDupes">close dupes</a>
+        <span class="footer-sep">·</span>
+        <a href="#" id="lnkMerge">merge windows</a>
+      </div>
+    </footer>
+  </div>
+  <script src="../lib/browser-polyfill.min.js"></script>
+  <script src="../data.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

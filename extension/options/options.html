@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Tab Hoor — Settings</title>
+  <link rel="stylesheet" href="options.css" />
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="logo">TAB HOOR <span>/ settings</span></div>
+      <div class="meta" id="storageMeta">local only · v0.3.0</div>
+    </header>
+
+    <main>
+      <section class="card">
+        <h2>Badge</h2>
+        <label class="field">
+          <span>Toolbar badge shows</span>
+          <select id="badgeMode">
+            <option value="count">Tab count</option>
+            <option value="rank">Rank number</option>
+            <option value="off">Off</option>
+          </select>
+        </label>
+      </section>
+
+      <section class="card">
+        <h2>History sampling</h2>
+        <p class="help">Counts only — no URLs. Samples power the 14-day sparkline and history page.</p>
+        <label class="field">
+          <span>Sample every</span>
+          <select id="sampling">
+            <option value="1m">1 minute</option>
+            <option value="5m">5 minutes</option>
+            <option value="15m">15 minutes</option>
+            <option value="evt">On tab change only</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Keep history for</span>
+          <select id="retention">
+            <option value="14d">14 days</option>
+            <option value="30d">30 days</option>
+            <option value="90d">90 days</option>
+            <option value="all">Forever</option>
+          </select>
+        </label>
+      </section>
+
+      <section class="card">
+        <h2>Achievements</h2>
+        <label class="check">
+          <input type="checkbox" id="showHints" />
+          <span>Show unlock hints on locked achievements</span>
+        </label>
+      </section>
+
+      <section class="card">
+        <h2>Data</h2>
+        <div class="row">
+          <button type="button" id="btnExport">Export JSON</button>
+          <button type="button" id="btnImport">Import JSON</button>
+          <button type="button" class="danger" id="btnClearHistory">Clear history samples</button>
+        </div>
+        <input type="file" id="importFile" accept="application/json,.json" hidden />
+        <p class="help" id="status"></p>
+      </section>
+    </main>
+  </div>
+  <script src="../lib/browser-polyfill.min.js"></script>
+  <script src="../data.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

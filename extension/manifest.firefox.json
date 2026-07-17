@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "Tab Hoor",
+  "version": "0.3.0",
+  "description": "Find out exactly what kind of hoor you are. Track your tabs, earn your rank, own it — all local.",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "96": "icons/icon-96.png",
+    "128": "icons/icon-128.png"
+  },
+  "action": {
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "96": "icons/icon-96.png"
+    },
+    "default_popup": "popup/popup.html",
+    "default_title": "Tab Hoor"
+  },
+  "background": {
+    "scripts": ["data.js", "background.js"]
+  },
+  "options_ui": {
+    "page": "options/options.html",
+    "open_in_tab": true
+  },
+  "permissions": ["tabs", "storage", "alarms"],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "tab-hoor@frank",
+      "strict_min_version": "121.0"
+    }
+  }
+}
