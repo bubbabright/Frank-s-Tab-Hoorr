@@ -9,6 +9,8 @@ if (typeof importScripts === 'function' && typeof TH_RANKS === 'undefined') {
 
 const api = globalThis.browser || globalThis.chrome;
 const ALARM_SAMPLE = 'th-sample';
+const ALARM_IDLE = 'th-idle';
+const IDLE_CHECK_MINUTES = 5; // how often we scan for idle tabs, independent of idleMinutes threshold
 
 // In-memory counts. SW/event-page restarts reset these to 0 — never paint the
 // badge from them until queryTabs() has run at least once this lifetime.
@@ -150,6 +152,100 @@ async function ensureSamplingAlarm(settings) {
   }
 }
 
+// ── duplicate tabs (ported from duplicate-tabs-closer, minimal: exact URL match) ──────────────
+
+async function dedupeTabs() {
+  const tabs = await api.tabs.query({});
+  const seen = new Map(); // normalized url -> tab to keep
+  const closeIds = [];
+  // Prefer keeping the active tab of a group, then the oldest tab id.
+  const sorted = tabs.slice().sort((a, b) => {
+    if (a.active !== b.active) return a.active ? -1 : 1;
+    return (a.id || 0) - (b.id || 0);
+  });
+  for (const tab of sorted) {
+    if (!tab.url) continue;
+    const key = thNormalizeUrl(tab.url);
+    if (seen.has(key)) {
+      closeIds.push(tab.id);
+    } else {
+      seen.set(key, tab);
+    }
+  }
+  if (closeIds.length) await api.tabs.remove(closeIds);
+  return closeIds.length;
+}
+
+// ── idle tab cleanup (ported from FFTabClose: close idle tabs, discard idle pinned tabs) ──────
+
+async function checkIdleTabs() {
+  const data = await getAll();
+  const settings = Object.assign({}, TH_DEFAULT_SETTINGS, data.settings || {});
+  if (!settings.idleEnabled) return { closed: 0, discarded: 0 };
+
+  const thresholdMs = (settings.idleMinutes || 30) * 60000;
+  const now = Date.now();
+  const tabs = await api.tabs.query({});
+  const closeIds = [];
+  const discardIds = [];
+
+  for (const tab of tabs) {
+    if (tab.active || tab.audible) continue;
+    if (tab.discarded) continue;
+    const lastAccessed = tab.lastAccessed || 0;
+    if (now - lastAccessed < thresholdMs) continue;
+    if (tab.pinned) {
+      discardIds.push(tab.id);
+    } else {
+      closeIds.push(tab.id);
+    }
+  }
+
+  if (closeIds.length) await api.tabs.remove(closeIds);
+  for (const id of discardIds) {
+    try { await api.tabs.discard(id); } catch (err) { console.error('Tab Hoor discard', err); }
+  }
+  return { closed: closeIds.length, discarded: discardIds.length };
+}
+
+async function ensureIdleAlarm(settings) {
+  settings = settings || TH_DEFAULT_SETTINGS;
+  await api.alarms.clear(ALARM_IDLE);
+  if (settings.idleEnabled) {
+    await api.alarms.create(ALARM_IDLE, { periodInMinutes: IDLE_CHECK_MINUTES });
+  }
+}
+
+// ── auto tab grouping (ported from firefox-auto-tab-grouping, Firefox-only tabGroups API) ─────
+
+async function groupTabIfMatch(tab) {
+  if (!api.tabGroups || !tab || !tab.url) return;
+  const data = await getAll();
+  const settings = Object.assign({}, TH_DEFAULT_SETTINGS, data.settings || {});
+  if (!settings.groupingEnabled) return;
+  const rules = thParseGroupingRules(settings.groupingRules);
+  if (!rules.length) return;
+
+  let hostname;
+  try { hostname = new URL(tab.url).hostname.toLowerCase(); } catch (_) { return; }
+  const rule = rules.find(r => hostname.includes(r.pattern));
+  if (!rule) return;
+  // Tab already in a group? Leave it alone rather than re-shuffling.
+  if (tab.groupId && tab.groupId !== -1) return;
+
+  try {
+    const groups = await api.tabGroups.query({ windowId: tab.windowId, title: rule.name });
+    if (groups && groups.length) {
+      await api.tabs.group({ tabIds: [tab.id], groupId: groups[0].id });
+    } else {
+      const groupId = await api.tabs.group({ tabIds: [tab.id] });
+      await api.tabGroups.update(groupId, { title: rule.name });
+    }
+  } catch (err) {
+    console.error('Tab Hoor groupTabIfMatch', err);
+  }
+}
+
 // ── messaging ────────────────────────────────────────────────────────────────
 
 api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
@@ -193,6 +289,25 @@ api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     refreshCounts().then(() => sendResponse({ ok: true })).catch(() => sendResponse({ ok: false }));
     return true;
   }
+  if (msg && msg.type === 'DEDUPE_TABS') {
+    dedupeTabs()
+      .then(count => sendResponse({ closed: count }))
+      .catch(() => sendResponse({ closed: 0 }));
+    return true;
+  }
+  if (msg && msg.type === 'CLOSE_OLD_TABS') {
+    const cutoff = Date.now() - msg.maxAge;
+    api.tabs.query({}).then(tabs => {
+      const oldTabs = tabs.filter(t => !t.active && !t.pinned && t.lastAccessed < cutoff);
+      const ids = oldTabs.map(t => t.id);
+      return api.tabs.remove(ids).then(() => {
+        sendResponse({ closed: ids.length });
+      });
+    }).catch(() => {
+      sendResponse({ closed: 0 });
+    });
+    return true;
+  }
 });
 
 // ── events ───────────────────────────────────────────────────────────────────
@@ -203,10 +318,17 @@ api.tabs.onReplaced.addListener(() => { refreshCounts(); });
 api.windows.onCreated.addListener(() => { refreshCounts(); });
 api.windows.onRemoved.addListener(() => { refreshCounts(); });
 
+api.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.url) groupTabIfMatch(tab);
+});
+
 api.alarms.onAlarm.addListener(alarm => {
   if (alarm.name === ALARM_SAMPLE) {
     // Re-query first so a slept worker doesn't record t:0.
     queryTabs().then(() => recordSample());
+  }
+  if (alarm.name === ALARM_IDLE) {
+    checkIdleTabs().catch(err => console.error('Tab Hoor checkIdleTabs', err));
   }
 });
 
@@ -215,6 +337,7 @@ api.storage.onChanged.addListener((changes, area) => {
   if (changes.settings) {
     const s = Object.assign({}, TH_DEFAULT_SETTINGS, changes.settings.newValue || {});
     ensureSamplingAlarm(s);
+    ensureIdleAlarm(s);
     // Never badge from stale in-memory count (was painting "0" on settings save).
     refreshCounts();
   }
@@ -225,6 +348,7 @@ api.runtime.onInstalled.addListener(async () => {
   if (!data.settings) await setPartial({ settings: TH_DEFAULT_SETTINGS });
   if (!data.installedDate) await setPartial({ installedDate: new Date().toISOString() });
   await ensureSamplingAlarm(Object.assign({}, TH_DEFAULT_SETTINGS, data.settings || {}));
+  await ensureIdleAlarm(Object.assign({}, TH_DEFAULT_SETTINGS, data.settings || {}));
   await refreshCounts();
   setTimeout(() => recordSample(), 1500);
 });
@@ -232,6 +356,7 @@ api.runtime.onInstalled.addListener(async () => {
 api.runtime.onStartup.addListener(async () => {
   const data = await getAll();
   await ensureSamplingAlarm(Object.assign({}, TH_DEFAULT_SETTINGS, data.settings || {}));
+  await ensureIdleAlarm(Object.assign({}, TH_DEFAULT_SETTINGS, data.settings || {}));
   await refreshCounts();
   setTimeout(() => recordSample(), 1500);
 });
@@ -239,5 +364,6 @@ api.runtime.onStartup.addListener(async () => {
 // Cold start (service worker wake)
 getAll().then(data => {
   ensureSamplingAlarm(Object.assign({}, TH_DEFAULT_SETTINGS, data.settings || {}));
+  ensureIdleAlarm(Object.assign({}, TH_DEFAULT_SETTINGS, data.settings || {}));
   refreshCounts();
 });
