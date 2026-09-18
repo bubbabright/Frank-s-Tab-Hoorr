@@ -1,0 +1,309 @@
+html {
+  /* max-height: 591px; */
+  margin-top: 5px;
+}
+
+body {
+  margin: 0;
+  padding: 10px 20px;
+  box-sizing: border-box;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dtc-text);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+
+.card {
+  overflow: hidden;
+}
+
+.card-header {
+  height: 32px;
+  padding: 10px 15px;
+  font-size: 15px;
+  background-image: none;
+  background-color: var(--dtc-header-bg);
+  border: 1px solid var(--dtc-header-border);
+  color: var(--dtc-header-text);
+}
+
+.card-body {
+  padding: 1px 0;
+  max-height: calc(100vh - 60px);
+  overflow: auto;
+  scrollbar-width: thin;
+}
+
+.list-group-item {
+  padding: 2px 15px 1px;
+}
+
+.list-group-item-overflow {
+  padding-right: 7px;
+}
+
+
+.list-group-item-header {
+  border-bottom: 0;
+  padding-top: 4px;
+  padding-bottom: 5px;
+}
+
+.list-group-item-title {
+  font-weight: bold;
+  width: 100%;
+}
+
+.list-group-item-title.list-group-expanded {
+  color: var(--dtc-section-title);
+}
+
+.list-group-item-title.list-group-collapsed {
+  color: var(--dtc-section-collapsed);
+}
+
+.checkbox-fa {
+  display: none;
+}
+
+
+.checkbox-fa+.checkbox-fa-label>.fa-thumbtack:not(:hover) {
+  color: #ffd39e;
+}
+
+.checkbox-fa:checked+.checkbox-fa-label>.fa-thumbtack:not(:hover) {
+  color: #FF8C00;
+}
+
+.checkbox-fa+.checkbox-fa-label>.fa-thumbtack:hover {
+  color: #fdbc6c;
+}
+
+.checkbox-fa:checked+.checkbox-fa-label>.fa-thumbtack:hover {
+  color: #ffaa42;
+}
+
+.fa-thumbtack {
+  margin-top: 6px;
+}
+
+.fa-thumbtack:hover {
+  cursor: pointer;
+  transform: scale(1.1);
+}
+
+.titleLabel {
+  margin: 4px 2px;
+}
+
+#matchingRulesBody {
+  margin-top: -3px;
+}
+
+#scopeBody {
+  margin-bottom: 5px;
+}
+
+#onDuplicateTabDetectedBody {
+  margin-bottom: 8px;
+}
+
+#themeBody {
+  margin-top: -2px;
+}
+
+.list-group-item-advanced-divider {
+  text-align: center;
+  font-size: 0.7rem;
+  color: var(--dtc-section-collapsed);
+  padding: 18px 15px 2px;
+  border-top: 1px solid var(--dtc-header-border);
+  background: transparent;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
+
+#pauseMonitorBtn {
+  margin-left: 6px;
+}
+
+#pauseMonitorBtn:hover {
+  transform: scale(1.2);
+}
+
+#pauseMonitorBtn.paused {
+  color: #f59e0b;
+}
+
+#pauseMonitorBtn.paused:hover {
+  color: #fbbf24;
+  transform: scale(1.2);
+}
+
+#groupDuplicateTabsBtn {
+  margin-right: 6px;
+  opacity: 0.55;
+  transition: opacity 0.15s;
+}
+
+#groupDuplicateTabsBtn:not(.disabled):hover {
+  transform: scale(1.2);
+  opacity: 1;
+}
+
+#groupDuplicateTabsBtn.active {
+  color: #0ea5e9;
+  opacity: 1;
+}
+
+#groupDuplicateTabsBtn.active:hover {
+  color: #38bdf8;
+  transform: scale(1.2);
+}
+
+#groupDuplicateTabsBtn.disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+#hideWhitelistedTabsBtn {
+  position: relative;
+  margin-right: 6px;
+  opacity: 0.55;
+  transition: opacity 0.15s;
+}
+
+#hideWhitelistedTabsBtn:not(.disabled):hover {
+  transform: scale(1.2);
+  opacity: 1;
+}
+
+#hideWhitelistedTabsBtn.active {
+  color: #0ea5e9;
+  opacity: 1;
+}
+
+#hideWhitelistedTabsBtn.active:hover {
+  color: #38bdf8;
+  transform: scale(1.2);
+}
+
+#hideWhitelistedTabsBtn.disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+#hideWhitelistedTabsBtn.active[data-wl-count]:not([data-wl-count="0"])::after {
+  content: attr(data-wl-count);
+  position: absolute;
+  top: -5px;
+  right: -6px;
+  background: #0ea5e9;
+  color: #fff;
+  border-radius: 50%;
+  font-size: 8px;
+  min-width: 12px;
+  height: 12px;
+  line-height: 12px;
+  text-align: center;
+  padding: 0 2px;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.popup-pin-label {
+  margin-left: 6px;
+  flex-shrink: 0;
+}
+
+.checkbox-fa + .popup-pin-label > .fa-eye:not(:hover) {
+  color: #ddd;
+}
+
+.checkbox-fa:checked + .popup-pin-label > .fa-eye:not(:hover) {
+  color: #3BB4EC;
+}
+
+.checkbox-fa + .popup-pin-label > .fa-eye:hover,
+.checkbox-fa:checked + .popup-pin-label > .fa-eye:hover {
+  color: #1aa7e8;
+  cursor: pointer;
+}
+
+/* ── Two-column layout ── */
+
+.panel-group {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+}
+
+#optionsCard {
+  flex: 11;
+  min-width: 0;
+}
+
+#duplicateTabsCard {
+  flex: 9;
+  min-width: 280px;
+}
+
+#duplicateTabsTableContainer {
+  height: auto !important;
+}
+
+#themeBody .titleLabel {
+  margin-top: 0;
+}
+
+#popupSectionBody label[for="openPopupOnDuplicateDetected"] {
+  margin-top: 4px;
+}
+
+#theme {
+  margin-bottom: 5px;
+}
+
+#titleMatchMode {
+  margin-bottom: 8px;
+}
+
+.color-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0;
+}
+
+.badgeColor {
+  width: 18px;
+  height: 18px;
+  padding: 1px 2px;
+  border: 1px solid var(--dtc-header-border);
+  border-radius: 5px;
+  cursor: pointer;
+  background: none;
+  flex-shrink: 0;
+}
+
+.color-row label {
+  font-size: 12px;
+  color: var(--dtc-text);
+  cursor: pointer;
+  margin: 0;
+}
+
+.file-access-warning {
+  color: #b45309;
+}
+
+html.theme-ocean .file-access-warning,
+html.theme-charcoal .file-access-warning,
+html.theme-purple .file-access-warning,
+html.theme-teal .file-access-warning,
+html.theme-oled .file-access-warning {
+  color: #fbbf24;
+}
