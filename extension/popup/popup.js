@@ -104,44 +104,70 @@ function refresh() {
   });
 }
 
-// Live count on the destructive button so it never closes tabs blind.
-let oldSeq = 0;
-function updateOldCount() {
-  const btn = document.getElementById('closeOldTabs');
-  const maxAge = parseInt(document.getElementById('ageThreshold').value, 10);
-  const seq = ++oldSeq;
-  return api.runtime.sendMessage({ type: 'CLOSE_OLD_TABS', maxAge, dryRun: true }).then(r => {
-    if (seq !== oldSeq) return;
-    const n = (r && r.count) || 0;
-    btn.textContent = n ? `Close ${n} Old` : 'No Old Tabs';
+// Each action button shows how many tabs/windows it would touch, so nothing runs blind.
+const COUNT_BUTTONS = [
+  {
+    id: 'closeOldTabs',
+    fallback: 'Close Old Tabs',
+    query: () => ({ type: 'CLOSE_OLD_TABS', maxAge: parseInt(document.getElementById('ageThreshold').value, 10), dryRun: true }),
+    count: r => r.count,
+    label: n => (n ? `Close ${n} Old` : 'No Old Tabs')
+  },
+  {
+    id: 'lnkDupes',
+    fallback: 'Close Dupes',
+    query: () => ({ type: 'DEDUPE_TABS', dryRun: true }),
+    count: r => r.count,
+    label: n => (n ? `Close ${n} ${n === 1 ? 'Dupe' : 'Dupes'}` : 'No Dupes')
+  },
+  {
+    id: 'btnMerge',
+    fallback: 'Merge Windows',
+    query: () => ({ type: 'MERGE_WINDOWS', dryRun: true }),
+    count: r => r.windows,
+    label: n => (n ? `Merge ${n} ${n === 1 ? 'Window' : 'Windows'}` : 'One Window'),
+    title: r => `${r.tabs} tabs from ${r.windows} other windows`
+  }
+];
+
+let countSeq = 0;
+function updateCounts() {
+  const seq = ++countSeq;
+  return Promise.all(COUNT_BUTTONS.map(async b => {
+    const btn = document.getElementById(b.id);
+    let r = null;
+    try { r = await api.runtime.sendMessage(b.query()); } catch (_) {}
+    if (seq !== countSeq) return;
+    if (!r) {
+      btn.textContent = b.fallback;
+      btn.disabled = false;
+      return;
+    }
+    const n = b.count(r) || 0;
+    btn.textContent = b.label(n);
     btn.disabled = n === 0;
-  }).catch(() => {
-    if (seq !== oldSeq) return;
-    btn.textContent = 'Close Old Tabs';
-    btn.disabled = false;
-  });
+    btn.title = b.title && n ? b.title(r) : '';
+  }));
 }
 
-// Busy label -> send -> result label -> refresh counts -> restore after 2s.
-async function runAction(btn, message, busy, doneLabel, reset) {
-  const original = btn.textContent;
+// Busy label -> send -> result label -> refresh stats -> restore live counts after 2s.
+async function runAction(btn, message, busy, doneLabel) {
   btn.disabled = true;
   btn.textContent = busy;
-  let label = original;
   try {
-    label = doneLabel(await api.runtime.sendMessage(message));
+    btn.textContent = doneLabel(await api.runtime.sendMessage(message));
   } catch (err) {
     console.error(err);
+    btn.textContent = 'Failed';
   }
-  btn.textContent = label;
   await refresh();
-  setTimeout(reset || (() => { btn.textContent = original; btn.disabled = false; }), 2000);
+  setTimeout(updateCounts, 2000);
 }
 
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('version').textContent = 'v' + api.runtime.getManifest().version;
   refresh();
-  updateOldCount();
+  updateCounts();
 
   document.getElementById('btnHistory').addEventListener('click', () => {
     api.tabs.create({ url: api.runtime.getURL('history/history.html') });
@@ -161,11 +187,11 @@ document.addEventListener('DOMContentLoaded', () => {
       r => (r && r.merged) ? `Merged ${r.merged}` : 'None Found');
   });
 
-  document.getElementById('ageThreshold').addEventListener('change', updateOldCount);
+  document.getElementById('ageThreshold').addEventListener('change', updateCounts);
 
   document.getElementById('closeOldTabs').addEventListener('click', e => {
     const maxAge = parseInt(document.getElementById('ageThreshold').value, 10);
     runAction(e.currentTarget, { type: 'CLOSE_OLD_TABS', maxAge }, 'Closing…',
-      r => (r && r.closed) ? `Closed ${r.closed}` : 'None Found', updateOldCount);
+      r => (r && r.closed) ? `Closed ${r.closed}` : 'None Found');
   });
 });

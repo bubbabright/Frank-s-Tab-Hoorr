@@ -162,6 +162,12 @@ async function ensureSamplingAlarm(settings) {
 // ── duplicate tabs (ported from duplicate-tabs-closer, minimal: exact URL match) ──────────────
 
 async function dedupeTabs() {
+  const closeIds = await findDupeIds();
+  if (closeIds.length) await api.tabs.remove(closeIds);
+  return closeIds.length;
+}
+
+async function findDupeIds() {
   const settings = await getSettings();
   const tabs = await api.tabs.query({});
   const seen = new Map(); // normalized url -> tab to keep
@@ -181,8 +187,7 @@ async function dedupeTabs() {
       seen.set(key, tab);
     }
   }
-  if (closeIds.length) await api.tabs.remove(closeIds);
-  return closeIds.length;
+  return closeIds;
 }
 
 // ── idle tab cleanup (ported from FFTabClose: close idle tabs, discard idle pinned tabs) ──────
@@ -285,13 +290,17 @@ async function groupExistingTabs() {
 
 // ── merge windows ────────────────────────────────────────────────────────────
 
-async function mergeAllWindows() {
+// Tabs outside the focused window; the set mergeAllWindows would move into it.
+async function findMergeTabs() {
   const activeWindow = await api.windows.getLastFocused({ windowTypes: ['normal'] });
-  if (!activeWindow) return { merged: 0, closed: 0 };
-
+  if (!activeWindow) return { activeWindow: null, otherTabs: [] };
   const allTabs = await api.tabs.query({});
-  const otherTabs = allTabs.filter(t => t.windowId !== activeWindow.id);
-  if (!otherTabs.length) return { merged: 0, closed: 0 };
+  return { activeWindow, otherTabs: allTabs.filter(t => t.windowId !== activeWindow.id) };
+}
+
+async function mergeAllWindows() {
+  const { activeWindow, otherTabs } = await findMergeTabs();
+  if (!activeWindow || !otherTabs.length) return { merged: 0, closed: 0 };
 
   // tabs.move does not preserve pinned status — record and re-pin afterward.
   const pinnedIds = new Set(otherTabs.filter(t => t.pinned).map(t => t.id));
@@ -366,6 +375,12 @@ api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
   if (msg && msg.type === 'DEDUPE_TABS') {
+    if (msg.dryRun) {
+      findDupeIds()
+        .then(ids => sendResponse({ count: ids.length }))
+        .catch(() => sendResponse({ count: 0 }));
+      return true;
+    }
     dedupeTabs()
       .then(count => sendResponse({ closed: count }))
       .catch(() => sendResponse({ closed: 0 }));
@@ -387,6 +402,15 @@ api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
   if (msg && msg.type === 'MERGE_WINDOWS') {
+    if (msg.dryRun) {
+      findMergeTabs()
+        .then(({ otherTabs }) => sendResponse({
+          windows: new Set(otherTabs.map(t => t.windowId)).size,
+          tabs: otherTabs.length
+        }))
+        .catch(() => sendResponse({ windows: 0, tabs: 0 }));
+      return true;
+    }
     mergeAllWindows().then(result => {
       sendResponse({ merged: result.merged, closed: result.closed });
     }).catch(err => {
