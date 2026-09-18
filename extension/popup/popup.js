@@ -139,6 +139,7 @@ async function runAction(btn, message, busy, doneLabel, reset) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('version').textContent = 'v' + api.runtime.getManifest().version;
   refresh();
   updateOldCount();
 

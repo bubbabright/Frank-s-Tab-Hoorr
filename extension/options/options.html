@@ -9,15 +9,81 @@
   <div class="wrap">
     <header>
       <div class="logo">TAB HOOR <span>/ settings</span></div>
-      <div class="meta" id="storageMeta">local only · v0.5.1</div>
+      <div class="meta" id="storageMeta">local only</div>
     </header>
 
     <main>
+      <section class="card" id="groupingCard">
+        <h2>Auto tab grouping <span class="pill">Firefox only</span></h2>
+        <p class="help">Groups tabs as you browse. Rules pin a site to a named group; auto mode groups any site with 2+ tabs, named after its domain. Rules win over auto mode.</p>
+        <label class="check">
+          <input type="checkbox" id="groupingEnabled" data-setting="groupingEnabled" />
+          <span>Enable auto grouping</span>
+        </label>
+        <label class="check">
+          <input type="checkbox" id="groupingAuto" data-setting="groupingAuto" data-requires="groupingEnabled" />
+          <span>Also group by domain (2+ tabs of one site)</span>
+        </label>
+        <label class="field field-stack">
+          <span>Rules — one per line: <code>pattern =&gt; Group Name</code>, pattern matches anywhere in the hostname</span>
+          <textarea id="groupingRules" data-setting="groupingRules" data-requires="groupingEnabled" rows="5" placeholder="github.com => Dev&#10;youtube.com => Media"></textarea>
+        </label>
+        <p class="help" id="rulesInfo"></p>
+      </section>
+
+      <section class="card">
+        <h2>Close duplicate tabs</h2>
+        <p class="help">Used by the "Close Dupes" button in the popup. Controls which tabs count as duplicates and which one gets kept.</p>
+        <label class="check">
+          <input type="checkbox" data-setting="dedupeIgnoreHash" />
+          <span>Ignore #fragment (page#section)</span>
+        </label>
+        <label class="check">
+          <input type="checkbox" data-setting="dedupeIgnoreQuery" />
+          <span>Ignore query string (?a=1)</span>
+        </label>
+        <label class="check">
+          <input type="checkbox" data-setting="dedupeIgnoreWww" />
+          <span>Ignore leading "www."</span>
+        </label>
+        <label class="check">
+          <input type="checkbox" data-setting="dedupeCaseInsensitive" />
+          <span>Case-insensitive match</span>
+        </label>
+        <label class="check">
+          <input type="checkbox" data-setting="dedupeKeepPinned" />
+          <span>Prefer keeping pinned tabs</span>
+        </label>
+        <label class="check">
+          <input type="checkbox" data-setting="dedupeKeepActive" />
+          <span>Prefer keeping the active tab</span>
+        </label>
+      </section>
+
+      <section class="card">
+        <h2>Idle cleanup</h2>
+        <p class="help">Closes idle normal tabs. Idle pinned tabs are discarded (unloaded, not closed). Active and audio-playing tabs are always safe.</p>
+        <label class="check">
+          <input type="checkbox" id="idleEnabled" data-setting="idleEnabled" />
+          <span>Enable idle cleanup</span>
+        </label>
+        <label class="field">
+          <span>Idle after</span>
+          <select id="idleMinutes" data-setting="idleMinutes" data-requires="idleEnabled">
+            <option value="15">15 minutes</option>
+            <option value="30">30 minutes</option>
+            <option value="60">1 hour</option>
+            <option value="180">3 hours</option>
+            <option value="360">6 hours</option>
+          </select>
+        </label>
+      </section>
+
       <section class="card">
         <h2>Badge</h2>
         <label class="field">
           <span>Toolbar badge shows</span>
-          <select id="badgeMode">
+          <select data-setting="badgeMode">
             <option value="count">Tab count</option>
             <option value="rank">Rank number</option>
             <option value="off">Off</option>
@@ -30,7 +96,7 @@
         <p class="help">Counts only — no URLs. Samples power the 14-day sparkline and history page.</p>
         <label class="field">
           <span>Sample every</span>
-          <select id="sampling">
+          <select data-setting="sampling">
             <option value="1m">1 minute</option>
             <option value="5m">5 minutes</option>
             <option value="15m">15 minutes</option>
@@ -39,7 +105,7 @@
         </label>
         <label class="field">
           <span>Keep history for</span>
-          <select id="retention">
+          <select data-setting="retention">
             <option value="14d">14 days</option>
             <option value="30d">30 days</option>
             <option value="90d">90 days</option>
@@ -49,70 +115,9 @@
       </section>
 
       <section class="card">
-        <h2>Idle cleanup</h2>
-        <p class="help">Closes idle normal tabs. Idle pinned tabs are discarded (unloaded, not closed). Active and audio-playing tabs are always safe.</p>
-        <label class="check">
-          <input type="checkbox" id="idleEnabled" />
-          <span>Enable idle cleanup</span>
-        </label>
-        <label class="field">
-          <span>Idle after</span>
-          <select id="idleMinutes">
-            <option value="15">15 minutes</option>
-            <option value="30">30 minutes</option>
-            <option value="60">1 hour</option>
-            <option value="180">3 hours</option>
-            <option value="360">6 hours</option>
-          </select>
-        </label>
-      </section>
-
-      <section class="card" id="groupingCard">
-        <h2>Auto tab grouping <span class="pill">Firefox only</span></h2>
-        <p class="help">One rule per line: <code>pattern =&gt; Group Name</code>. Pattern matches anywhere in the tab's hostname.</p>
-        <label class="check">
-          <input type="checkbox" id="groupingEnabled" />
-          <span>Enable auto grouping</span>
-        </label>
-        <label class="check">
-          <input type="checkbox" id="groupingAuto" />
-          <span>Also auto-group by domain (2+ tabs of the same site, group named after the domain; rules below win)</span>
-        </label>
-        <label class="field field-stack">
-          <span>Rules</span>
-          <textarea id="groupingRules" rows="5" placeholder="github.com => Dev&#10;youtube.com => Media"></textarea>
-        </label>
-      </section>
-
-      <section class="card">
-        <h2>Close duplicate tabs</h2>
-        <p class="help">Used by the "Close Dupes" button in the popup. Controls which tabs count as duplicates and which one gets kept.</p>
-        <label class="check">
-          <input type="checkbox" id="dedupeIgnoreQuery" />
-          <span>Ignore query string (?a=1)</span>
-        </label>
-        <label class="check">
-          <input type="checkbox" id="dedupeIgnoreWww" />
-          <span>Ignore leading "www."</span>
-        </label>
-        <label class="check">
-          <input type="checkbox" id="dedupeCaseInsensitive" />
-          <span>Case-insensitive match</span>
-        </label>
-        <label class="check">
-          <input type="checkbox" id="dedupeKeepPinned" />
-          <span>Prefer keeping pinned tabs</span>
-        </label>
-        <label class="check">
-          <input type="checkbox" id="dedupeKeepActive" />
-          <span>Prefer keeping the active tab</span>
-        </label>
-      </section>
-
-      <section class="card">
         <h2>Achievements</h2>
         <label class="check">
-          <input type="checkbox" id="showHints" />
+          <input type="checkbox" data-setting="showHints" />
           <span>Show unlock hints on locked achievements</span>
         </label>
       </section>
@@ -125,10 +130,10 @@
           <button type="button" class="danger" id="btnClearHistory">Clear history samples</button>
         </div>
         <input type="file" id="importFile" accept="application/json,.json" hidden />
-        <p class="help" id="status"></p>
       </section>
     </main>
   </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <script src="../lib/browser-polyfill.min.js"></script>
   <script src="../data.js"></script>
   <script src="options.js"></script>

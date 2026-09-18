@@ -2,54 +2,92 @@
 'use strict';
 
 const api = globalThis.browser || globalThis.chrome;
+const IMPORT_KEYS = ['settings', 'samples', 'achievements', 'ath', 'athDate', 'installedDate', '_belowAth'];
 
-function setStatus(msg) {
-  document.getElementById('status').textContent = msg || '';
+const fields = () => Array.from(document.querySelectorAll('[data-setting]'));
+const isPlainObject = v => !!v && typeof v === 'object' && !Array.isArray(v);
+
+let toastTimer;
+function toast(msg, ms = 1500) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), ms);
+}
+
+function readField(el) {
+  const def = TH_DEFAULT_SETTINGS[el.dataset.setting];
+  if (el.type === 'checkbox') return el.checked;
+  if (typeof def === 'number') return parseInt(el.value, 10) || def;
+  return el.value;
+}
+
+function writeField(el, value) {
+  if (el.type === 'checkbox') el.checked = !!value;
+  else el.value = String(value);
+}
+
+// Controls that only matter while their master toggle is on.
+function applyDependents() {
+  for (const el of document.querySelectorAll('[data-requires]')) {
+    const master = document.querySelector(`[data-setting="${el.dataset.requires}"]`);
+    const off = !(master && master.checked);
+    el.disabled = off;
+    const label = el.closest('label');
+    if (label) label.classList.toggle('dimmed', off);
+  }
+}
+
+function updateRulesInfo() {
+  const text = document.getElementById('groupingRules').value;
+  const lines = text.split('\n').filter(l => l.trim()).length;
+  const rules = thParseGroupingRules(text).length;
+  const bad = lines - rules;
+  document.getElementById('rulesInfo').textContent =
+    `${rules} ${rules === 1 ? 'rule' : 'rules'}` +
+    (bad ? ` · ${bad} ${bad === 1 ? 'line' : 'lines'} ignored (need "pattern => Group Name")` : '');
 }
 
 async function load() {
-  const data = await api.storage.local.get(null);
-  const s = Object.assign({}, TH_DEFAULT_SETTINGS, data.settings || {});
-  document.getElementById('badgeMode').value = s.badgeMode;
-  document.getElementById('sampling').value = s.sampling;
-  document.getElementById('retention').value = s.retention;
-  document.getElementById('showHints').checked = s.showHints !== false;
-  document.getElementById('idleEnabled').checked = !!s.idleEnabled;
-  document.getElementById('idleMinutes').value = String(s.idleMinutes || 30);
-  document.getElementById('groupingEnabled').checked = !!s.groupingEnabled;
-  document.getElementById('groupingRules').value = s.groupingRules || '';
-  document.getElementById('groupingAuto').checked = !!s.groupingAuto;
-  document.getElementById('dedupeIgnoreQuery').checked = !!s.dedupeIgnoreQuery;
-  document.getElementById('dedupeIgnoreWww').checked = !!s.dedupeIgnoreWww;
-  document.getElementById('dedupeCaseInsensitive').checked = !!s.dedupeCaseInsensitive;
-  document.getElementById('dedupeKeepPinned').checked = s.dedupeKeepPinned !== false;
-  document.getElementById('dedupeKeepActive').checked = s.dedupeKeepActive !== false;
-  const bytes = JSON.stringify(data).length;
-  document.getElementById('storageMeta').textContent =
-    `local only · v0.5.1 · ~${(bytes / 1024).toFixed(1)} KB used`;
+  const { settings } = await api.storage.local.get('settings');
+  const s = Object.assign({}, TH_DEFAULT_SETTINGS, settings || {});
+  fields().forEach(el => writeField(el, s[el.dataset.setting]));
+  applyDependents();
+  updateRulesInfo();
+  let meta = `local only · v${api.runtime.getManifest().version}`;
+  if (api.storage.local.getBytesInUse) {
+    try { meta += ` · ~${((await api.storage.local.getBytesInUse(null)) / 1024).toFixed(1)} KB used`; } catch (_) {}
+  }
+  document.getElementById('storageMeta').textContent = meta;
 }
 
 async function saveFromUI() {
-  const settings = {
-    badgeMode: document.getElementById('badgeMode').value,
-    sampling: document.getElementById('sampling').value,
-    retention: document.getElementById('retention').value,
-    showHints: document.getElementById('showHints').checked,
-    idleEnabled: document.getElementById('idleEnabled').checked,
-    idleMinutes: parseInt(document.getElementById('idleMinutes').value, 10) || 30,
-    groupingEnabled: document.getElementById('groupingEnabled').checked,
-    groupingRules: document.getElementById('groupingRules').value,
-    groupingAuto: document.getElementById('groupingAuto').checked,
-    dedupeIgnoreQuery: document.getElementById('dedupeIgnoreQuery').checked,
-    dedupeIgnoreWww: document.getElementById('dedupeIgnoreWww').checked,
-    dedupeCaseInsensitive: document.getElementById('dedupeCaseInsensitive').checked,
-    dedupeKeepPinned: document.getElementById('dedupeKeepPinned').checked,
-    dedupeKeepActive: document.getElementById('dedupeKeepActive').checked
-  };
-  await api.storage.local.set({ settings });
-  setStatus('Saved.');
-  // nudge badge refresh
+  const { settings } = await api.storage.local.get('settings');
+  const next = Object.assign({}, settings || {});
+  fields().forEach(el => { next[el.dataset.setting] = readField(el); });
+  await api.storage.local.set({ settings: next });
+  toast('Saved');
   try { await api.runtime.sendMessage({ type: 'REFRESH' }); } catch (_) {}
+}
+
+function sanitizeImport(data) {
+  if (!isPlainObject(data)) throw new Error('not a Tab Hoor export');
+  const out = {};
+  for (const k of IMPORT_KEYS) if (k in data) out[k] = data[k];
+  if ('samples' in out && !Array.isArray(out.samples)) throw new Error('samples must be a list');
+  if ('achievements' in out && !isPlainObject(out.achievements)) throw new Error('achievements must be an object');
+  if ('ath' in out && typeof out.ath !== 'number') throw new Error('ath must be a number');
+  if ('settings' in out) {
+    if (!isPlainObject(out.settings)) throw new Error('settings must be an object');
+    const src = out.settings;
+    out.settings = {};
+    for (const [k, def] of Object.entries(TH_DEFAULT_SETTINGS)) {
+      out.settings[k] = typeof src[k] === typeof def ? src[k] : def;
+    }
+  }
+  if (!Object.keys(out).length) throw new Error('nothing to import');
+  return out;
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -58,13 +96,19 @@ document.addEventListener('DOMContentLoaded', () => {
     const card = document.getElementById('groupingCard');
     if (card) card.hidden = true;
   }
-  [
-    'badgeMode', 'sampling', 'retention', 'showHints',
-    'idleEnabled', 'idleMinutes', 'groupingEnabled', 'groupingRules', 'groupingAuto',
-    'dedupeIgnoreQuery', 'dedupeIgnoreWww', 'dedupeCaseInsensitive',
-    'dedupeKeepPinned', 'dedupeKeepActive'
-  ].forEach(id => {
-    document.getElementById(id).addEventListener('change', saveFromUI);
+
+  fields().forEach(el => el.addEventListener('change', () => {
+    applyDependents();
+    updateRulesInfo();
+    saveFromUI();
+  }));
+
+  // Save while typing so a rule isn't lost if the tab is closed before blur.
+  let rulesTimer;
+  document.getElementById('groupingRules').addEventListener('input', () => {
+    updateRulesInfo();
+    clearTimeout(rulesTimer);
+    rulesTimer = setTimeout(saveFromUI, 500);
   });
 
   document.getElementById('btnExport').addEventListener('click', async () => {
@@ -76,7 +120,7 @@ document.addEventListener('DOMContentLoaded', () => {
     a.download = `tab-hoor-export-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
-    setStatus('Exported.');
+    toast('Exported');
   });
 
   document.getElementById('btnImport').addEventListener('click', () => {
@@ -85,24 +129,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('importFile').addEventListener('change', async e => {
     const file = e.target.files && e.target.files[0];
+    e.target.value = '';
     if (!file) return;
     try {
-      const text = await file.text();
-      const data = JSON.parse(text);
+      const data = sanitizeImport(JSON.parse(await file.text()));
+      if (!confirm('Replace current data with this file?')) return;
       await api.storage.local.set(data);
       await load();
       try { await api.runtime.sendMessage({ type: 'REFRESH' }); } catch (_) {}
-      setStatus('Imported.');
+      toast('Imported');
     } catch (err) {
-      setStatus('Import failed: ' + err.message);
+      toast('Import failed: ' + err.message, 4000);
     }
-    e.target.value = '';
   });
 
   document.getElementById('btnClearHistory').addEventListener('click', async () => {
     if (!confirm('Clear all history samples? Ranks and achievements stay.')) return;
     await api.storage.local.set({ samples: [] });
-    setStatus('History cleared.');
     await load();
+    toast('History cleared');
   });
 });

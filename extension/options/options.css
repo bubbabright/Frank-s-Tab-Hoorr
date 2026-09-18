@@ -117,4 +117,27 @@ button {
 button:hover { border-color: var(--gold-dim); color: var(--gold); }
 button.danger { border-color: #5a2020; color: #f0a0a0; }
 button.danger:hover { border-color: var(--danger); color: #fff; }
-#status { min-height: 1.2em; color: var(--gold-dim); }
+input[type="checkbox"] { accent-color: var(--gold); width: 16px; height: 16px; }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+.dimmed { opacity: 0.45; }
+.dimmed, .dimmed * { cursor: default; }
+.field-stack > span { font-size: 13px; }
+.toast {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  background: #000;
+  color: var(--gold);
+  border: 1px solid var(--gold-dim);
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 13px;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 0.2s, transform 0.2s;
+  pointer-events: none;
+}
+.toast.show { opacity: 1; transform: none; }
