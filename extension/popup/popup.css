@@ -71,7 +71,6 @@ header {
   text-transform: uppercase;
   margin-bottom: 8px;
 }
-.section-count { letter-spacing: 0; font-size: 13px; color: var(--text); }
 
 .closer-section {
   background: var(--bg-section);
@@ -147,45 +146,6 @@ header {
   text-transform: uppercase;
 }
 .window-count { font-size: 12px; color: var(--text-dim); margin-top: 3px; }
-.rank-title {
-  font-family: var(--font-main);
-  font-size: 17px;
-  color: var(--gold);
-  letter-spacing: 1px;
-  text-transform: uppercase;
-  margin-top: 10px;
-}
-.rank-quote {
-  font-size: 13px;
-  color: var(--text-dim);
-  font-style: italic;
-  line-height: 1.4;
-  margin-top: 4px;
-  padding: 0 4px;
-}
-.prog { margin-top: 10px; }
-.prog-bar {
-  height: 5px;
-  background: var(--bg-card);
-  border-radius: 2px;
-  overflow: hidden;
-}
-.prog-fill {
-  height: 100%;
-  width: 0%;
-  background: var(--gold);
-  transition: width 0.3s ease;
-}
-.prog-meta {
-  display: flex;
-  justify-content: space-between;
-  font-size: 12px;
-  color: var(--text-dim);
-  margin-top: 5px;
-  gap: 6px;
-}
-.prog-meta b { color: var(--text); font-weight: 700; }
-
 .stats-row {
   display: flex;
   align-items: center;
@@ -209,54 +169,3 @@ header {
 .stat-sub { font-size: 12px; color: var(--text-dim); margin-top: 3px; }
 .stat-divider { width: 1px; height: 40px; background: var(--border); margin: 0 8px; }
 .stat-spark { min-width: 140px; }
-
-.achievements-section { padding: 10px 16px 12px; }
-.achievements-grid {
-  display: grid;
-  grid-template-columns: repeat(8, 1fr);
-  gap: 4px;
-}
-.achievement {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 6px 0;
-  border-radius: 6px;
-  background: var(--bg-card);
-  position: relative;
-  cursor: default;
-}
-.achievement.unlocked {
-  background: #1e2a14;
-  border: 1px solid #3a5520;
-}
-.achievement.locked { opacity: 0.4; filter: grayscale(1); }
-.achievement-icon { font-size: 18px; line-height: 1; }
-.achievement:hover .achievement-tooltip { display: block; }
-.achievement-tooltip {
-  display: none;
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 50%;
-  transform: translateX(-50%);
-  background: #000;
-  border: 1px solid var(--gold-dim);
-  color: var(--text);
-  font-size: 12px;
-  padding: 6px 8px;
-  border-radius: 4px;
-  width: 180px;
-  z-index: 10;
-  line-height: 1.4;
-  pointer-events: none;
-}
-/* Edge chips: anchor the tooltip to the chip's side so it can't clip outside the popup. */
-.achievement:nth-child(-n+2) .achievement-tooltip { left: 0; transform: none; }
-.achievement:nth-last-child(-n+2) .achievement-tooltip { left: auto; right: 0; transform: none; }
-.achievement-tooltip strong {
-  display: block;
-  color: var(--gold);
-  margin-bottom: 2px;
-  font-size: 12px;
-}
-.tip-date { display: block; color: #777; font-size: 11px; margin-top: 2px; }

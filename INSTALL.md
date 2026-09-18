@@ -68,13 +68,13 @@ Stable extension id: see `extension/chrome-extension-id.txt`.
 
 ---
 
-## Features (v0.3)
+## Features (v0.6)
 
-- Live tab / window counts + toolbar badge
-- Frank ranks + quotes
-- Achievements with unlock dates
+- Live tab / window counts + toolbar badge (colour shifts as the count grows)
+- Popup actions with live counts: Close Dupes, Merge Windows, Close Old Tabs
+- Idle-tab cleanup and Firefox auto tab grouping (rules + optional group-by-domain)
 - All-time high
 - History sampling (alarms) + 14-day sparkline
 - Full history page (ranges, chart, CSV export)
-- Options: badge mode, sample interval, retention, hints
+- Options: badge mode, sample interval, retention, dedupe rules, idle cleanup, grouping
 - All data local — counts only, no URLs

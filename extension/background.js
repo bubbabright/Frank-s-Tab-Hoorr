@@ -3,7 +3,7 @@
 
 // Chrome service worker loads this file alone — pull in shared data.
 // Firefox lists data.js before this file in background.scripts.
-if (typeof importScripts === 'function' && typeof TH_RANKS === 'undefined') {
+if (typeof importScripts === 'function' && typeof TH_DEFAULT_SETTINGS === 'undefined') {
   importScripts('data.js');
 }
 
@@ -40,56 +40,16 @@ function getSettings() {
 
 function updateBadge(count, settings) {
   settings = settings || {};
-  const rank = thRankFor(count);
-  const color = TH_BADGE_COLORS[rank.tone] || '#3db85a';
-  const mode = settings.badgeMode || 'count';
+  const color = TH_BADGE_COLORS[thTone(count)] || '#3db85a';
+  // Avoid flashing "0" while the worker is still querying after a wake; mode 'off' → empty.
   let text = '';
-  if (!countsReady) {
-    // Avoid flashing "0" while the worker is still querying after a wake.
-    text = '';
-  } else if (mode === 'count') {
+  if (countsReady && settings.badgeMode !== 'off') {
     text = count > 999 ? '999+' : String(count);
-  } else if (mode === 'rank') {
-    text = String(thRankIndex(count) + 1);
   }
-  // mode === 'off' → empty
   return Promise.all([
     api.action.setBadgeText({ text }),
     api.action.setBadgeBackgroundColor({ color })
   ]);
-}
-
-// ── achievements ─────────────────────────────────────────────────────────────
-
-function checkAchievements(tCount, wCount, data) {
-  const stored = data.achievements || {};
-  const updated = Object.assign({}, stored);
-  let changed = false;
-  const now = Date.now();
-
-  function unlock(id) {
-    if (!updated[id] || !updated[id].unlocked) {
-      updated[id] = { unlocked: true, date: thFormatDate(now), ts: now };
-      changed = true;
-    }
-  }
-
-  for (const ach of TH_ACHIEVEMENTS) {
-    if (ach.type === 'tabs' && tCount >= ach.threshold) unlock(ach.id);
-    if (ach.type === 'windows' && wCount >= ach.threshold) unlock(ach.id);
-  }
-
-  const ath = data.ath || 0;
-  const below = !!data._belowAth;
-  if (tCount < ath && ath > 0) {
-    if (!below) setPartial({ _belowAth: true });
-  } else if (below && tCount >= ath && ath > 0) {
-    unlock('relapser');
-    setPartial({ _belowAth: false });
-  }
-
-  if (changed) return setPartial({ achievements: updated });
-  return Promise.resolve();
 }
 
 // ── counts ───────────────────────────────────────────────────────────────────
@@ -129,7 +89,6 @@ async function onCountUpdate() {
     await setPartial({ ath, athDate });
   }
   await updateBadge(tabCount, settings);
-  await checkAchievements(tabCount, windowCount, Object.assign({}, data, { ath }));
   if (settings.sampling === 'evt') await recordSample();
 }
 
@@ -342,19 +301,13 @@ api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         const settings = Object.assign({}, TH_DEFAULT_SETTINGS, data.settings || {});
         // Keep badge in sync while we're here (options/popup open often wake the worker).
         updateBadge(tabCount, settings);
-        const rank = thRankFor(tabCount);
         sendResponse({
           tabCount,
           windowCount,
-          rank,
-          rankIdx: thRankIndex(tabCount),
+          tone: thTone(tabCount),
           ath: data.ath || 0,
           athDate: data.athDate || '',
-          achievements: data.achievements || {},
-          trend: thTrend14(data.samples),
-          settings,
-          definitions: TH_ACHIEVEMENTS,
-          ranks: TH_RANKS
+          trend: thTrend14(data.samples)
         });
       })
       .catch(err => {
@@ -484,8 +437,24 @@ api.runtime.onStartup.addListener(async () => {
   groupExistingTabs().catch(err => console.error('Tab Hoor groupExistingTabs', err));
 });
 
+// Drop stored state from removed features (achievements, ranks). Idempotent.
+function migrateLegacy(data) {
+  const jobs = [];
+  const stale = ['achievements', '_belowAth'].filter(k => k in data);
+  if (stale.length) jobs.push(api.storage.local.remove(stale));
+  const s = data.settings;
+  if (s && ('showHints' in s || s.badgeMode === 'rank')) {
+    const settings = Object.assign({}, s);
+    delete settings.showHints;
+    if (settings.badgeMode === 'rank') settings.badgeMode = 'count';
+    jobs.push(setPartial({ settings }));
+  }
+  return Promise.all(jobs);
+}
+
 // Cold start (service worker wake)
 getAll().then(data => {
+  migrateLegacy(data).catch(err => console.error('Tab Hoor migrateLegacy', err));
   ensureSamplingAlarm(Object.assign({}, TH_DEFAULT_SETTINGS, data.settings || {}));
   ensureIdleAlarm(Object.assign({}, TH_DEFAULT_SETTINGS, data.settings || {}));
   refreshCounts();

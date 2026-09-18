@@ -17,7 +17,7 @@ The tone is Danny DeVito's **Frank Reynolds** from *It's Always Sunny in Philade
 
 ---
 
-## Current State (v0.1)
+## Current State (v0.1 snapshot — rank/achievement items below were removed in v0.6.0)
 
 The extension is fully functional. What exists today:
 
@@ -44,38 +44,9 @@ The extension is fully functional. What exists today:
 
 ---
 
-## Rank System
+## Rank System / Achievement System — removed in v0.6.0
 
-| Tabs | Rank Title | Frank Quote |
-|------|-----------|-------------|
-| 0–5 | Tab Teetotaler | *"You a hoor? ...No? Not even a little?"* |
-| 6–15 | Tab Curious | *"You two aren't bangin' are ya?"* |
-| 16–30 | Getting Around | *"Daaah yeah it is. Stay away from that, trust me."* |
-| 31–50 | Certified Hoor | *"Now we're talking. Boiling denim territory."* |
-| 51–75 | Tab Whore | *"Boiling denim and bangin hoors!"* |
-| 76–100 | Dirty Hoor | *"Dennis, your mother is a dirty dirty houer."* |
-| 101–150 | Filthy Hoor | *"He says he has sex with hundreds of... tabs."* |
-| 151–200 | Legendary Hoor | *"It's a three-syllable word for a REASON."* |
-| 201+ | Frank Reynolds Level | *"Bless this wonderful, wonderful hoor."* |
-
----
-
-## Achievement System
-
-| Icon | ID | Name | Trigger |
-|------|----|------|---------|
-| 🍀 | first_time | First Time | 1 tab |
-| 🥐 | bakers_dozen | Baker's Dozen | 13 tabs |
-| 💃 | dirty_thirty | The Dirty Thirty | 30 tabs |
-| 🔥 | fifty_club | The Fifty Club | 50 tabs |
-| 💯 | triple_digits | Triple Digits | 100 tabs |
-| 🪟 | window_dressing | Window Dressing | 5+ windows |
-| 🔄 | relapser | The Relapser | Went below ATH, then came back up |
-| 👑 | frank_level | Frank Reynolds Level | 200 tabs |
-
-Locked achievements display at 35% opacity with grayscale filter. Unlocked achievements show in a green-tinted card with the unlock date on hover.
-
----
+Ranks, Frank quotes, the rank progress bar and the achievement grid were removed from the popup, background and options. Popup/badge colour still follows tab count (green ≤15, amber ≤50, red ≤150, purple above). The original tables remain in git history (see commits up to v0.5.3).
 
 ## Requested Features (v0.2)
 

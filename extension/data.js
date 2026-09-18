@@ -1,28 +1,5 @@
-// Tab Hoor — shared ranks & achievements (codename: frank)
+// Tab Hoor — shared constants and helpers (codename: frank)
 'use strict';
-
-const TH_RANKS = [
-  { min: 0,   max: 5,        title: 'Tab Teetotaler',       quote: "You a hoor? ...No? Not even a little?", tone: 'green' },
-  { min: 6,   max: 15,       title: 'Tab Curious',          quote: "You two aren't bangin' are ya?", tone: 'green' },
-  { min: 16,  max: 30,       title: 'Getting Around',       quote: "Daaah yeah it is. Stay away from that, trust me.", tone: 'amber' },
-  { min: 31,  max: 50,       title: 'Certified Hoor',       quote: "Now we're talking. Boiling denim territory.", tone: 'amber' },
-  { min: 51,  max: 75,       title: 'Tab Whore',            quote: "Boiling denim and bangin hoors!", tone: 'red' },
-  { min: 76,  max: 100,      title: 'Dirty Hoor',           quote: "Dennis, your mother is a dirty dirty houer.", tone: 'red' },
-  { min: 101, max: 150,      title: 'Filthy Hoor',          quote: "He says he has sex with hundreds of... tabs.", tone: 'red' },
-  { min: 151, max: 200,      title: 'Legendary Hoor',       quote: "It's a three-syllable word for a REASON.", tone: 'purple' },
-  { min: 201, max: Infinity, title: 'Frank Reynolds Level', quote: "Bless this wonderful, wonderful hoor.", tone: 'purple' }
-];
-
-const TH_ACHIEVEMENTS = [
-  { id: 'first_time',      icon: '🍀', name: 'First Time',          desc: "Everyone starts somewhere, ya hoor.", hint: 'Open 1 tab', type: 'tabs', threshold: 1 },
-  { id: 'bakers_dozen',    icon: '🥐', name: "Baker's Dozen",       desc: "13 tabs. Unlucky for some. Not for you.", hint: 'Reach 13 tabs', type: 'tabs', threshold: 13 },
-  { id: 'dirty_thirty',    icon: '💃', name: 'The Dirty Thirty',    desc: "30 tabs. Daaah yeah it is.", hint: 'Reach 30 tabs', type: 'tabs', threshold: 30 },
-  { id: 'fifty_club',      icon: '🔥', name: 'The Fifty Club',      desc: "50 tabs. We're boiling denim now.", hint: 'Reach 50 tabs', type: 'tabs', threshold: 50 },
-  { id: 'triple_digits',   icon: '💯', name: 'Triple Digits',       desc: "A HUNDRED tabs. You sick, beautiful hoor.", hint: 'Reach 100 tabs', type: 'tabs', threshold: 100 },
-  { id: 'window_dressing', icon: '🪟', name: 'Window Dressing',     desc: "Spreading yourself across 5+ windows.", hint: 'Open 5+ windows', type: 'windows', threshold: 5 },
-  { id: 'relapser',        icon: '🔄', name: 'The Relapser',        desc: "You closed some tabs, then came right back.", hint: '???', type: 'special', threshold: null },
-  { id: 'frank_level',     icon: '👑', name: 'Frank Reynolds Level', desc: "200 tabs. Bless this wonderful creature.", hint: 'Reach 200 tabs', type: 'tabs', threshold: 200 }
-];
 
 const TH_BADGE_COLORS = {
   green:  '#3db85a',
@@ -32,10 +9,9 @@ const TH_BADGE_COLORS = {
 };
 
 const TH_DEFAULT_SETTINGS = {
-  badgeMode: 'count',   // count | rank | off
+  badgeMode: 'count',   // count | off
   sampling: '5m',       // 1m | 5m | 15m | evt
   retention: '90d',     // 14d | 30d | 90d | all
-  showHints: true,
   idleEnabled: false,   // auto-close/discard idle tabs (ported from FFTabClose)
   idleMinutes: 30,
   groupingEnabled: false, // auto tab grouping by hostname rule, Firefox only (ported from firefox-auto-tab-grouping)
@@ -49,13 +25,12 @@ const TH_DEFAULT_SETTINGS = {
   dedupeKeepActive: true    // prefer keeping the active tab over a background duplicate
 };
 
-function thRankFor(n) {
-  return TH_RANKS.find(r => n >= r.min && n <= r.max) || TH_RANKS[TH_RANKS.length - 1];
-}
-
-function thRankIndex(n) {
-  const i = TH_RANKS.findIndex(r => n >= r.min && n <= r.max);
-  return i < 0 ? TH_RANKS.length - 1 : i;
+// Colour tone for a tab count (drives badge, popup count and sparkline colour).
+function thTone(n) {
+  if (n <= 15) return 'green';
+  if (n <= 50) return 'amber';
+  if (n <= 150) return 'red';
+  return 'purple';
 }
 
 function thFormatDate(ts) {
@@ -144,12 +119,9 @@ function thNormalizeUrl(url, settings) {
 
 // Export for service worker (importScripts) and pages
 if (typeof globalThis !== 'undefined') {
-  globalThis.TH_RANKS = TH_RANKS;
-  globalThis.TH_ACHIEVEMENTS = TH_ACHIEVEMENTS;
   globalThis.TH_BADGE_COLORS = TH_BADGE_COLORS;
   globalThis.TH_DEFAULT_SETTINGS = TH_DEFAULT_SETTINGS;
-  globalThis.thRankFor = thRankFor;
-  globalThis.thRankIndex = thRankIndex;
+  globalThis.thTone = thTone;
   globalThis.thFormatDate = thFormatDate;
   globalThis.thRetentionMs = thRetentionMs;
   globalThis.thSamplingMinutes = thSamplingMinutes;

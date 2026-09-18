@@ -1,6 +1,6 @@
 # Tab Hoor (frank)
 
-Gamify your tab hoarding. Ranks, achievements, history — all local. Firefox + Chrome.
+Count, dedupe, merge and auto-group your tabs, with a local history of your tab count. Firefox + Chrome.
 
 ## Install
 

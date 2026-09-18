@@ -2,7 +2,7 @@
 'use strict';
 
 const api = globalThis.browser || globalThis.chrome;
-const IMPORT_KEYS = ['settings', 'samples', 'achievements', 'ath', 'athDate', 'installedDate', '_belowAth'];
+const IMPORT_KEYS = ['settings', 'samples', 'ath', 'athDate', 'installedDate', '_belowAth'];
 
 const fields = () => Array.from(document.querySelectorAll('[data-setting]'));
 const isPlainObject = v => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -76,7 +76,6 @@ function sanitizeImport(data) {
   const out = {};
   for (const k of IMPORT_KEYS) if (k in data) out[k] = data[k];
   if ('samples' in out && !Array.isArray(out.samples)) throw new Error('samples must be a list');
-  if ('achievements' in out && !isPlainObject(out.achievements)) throw new Error('achievements must be an object');
   if ('ath' in out && typeof out.ath !== 'number') throw new Error('ath must be a number');
   if ('settings' in out) {
     if (!isPlainObject(out.settings)) throw new Error('settings must be an object');
@@ -85,6 +84,7 @@ function sanitizeImport(data) {
     for (const [k, def] of Object.entries(TH_DEFAULT_SETTINGS)) {
       out.settings[k] = typeof src[k] === typeof def ? src[k] : def;
     }
+    if (out.settings.badgeMode !== 'off') out.settings.badgeMode = 'count'; // legacy 'rank' -> count
   }
   if (!Object.keys(out).length) throw new Error('nothing to import');
   return out;
@@ -144,7 +144,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   document.getElementById('btnClearHistory').addEventListener('click', async () => {
-    if (!confirm('Clear all history samples? Ranks and achievements stay.')) return;
+    if (!confirm('Clear all history samples? All-time high stays.')) return;
     await api.storage.local.set({ samples: [] });
     await load();
     toast('History cleared');

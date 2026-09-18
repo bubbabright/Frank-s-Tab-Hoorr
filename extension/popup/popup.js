@@ -37,61 +37,20 @@ function sparklineSVG(data, color) {
 
 function render(data) {
   if (!data) return;
-  const {
-    tabCount, windowCount, rank, rankIdx, ath, athDate,
-    achievements, trend, definitions, ranks, settings
-  } = data;
+  const { tabCount, windowCount, tone, ath, athDate, trend } = data;
 
   const el = document.getElementById('tabCount');
   el.textContent = tabCount;
-  el.className = 'tab-count ' + toneClass(rank.tone);
+  el.className = 'tab-count ' + toneClass(tone);
 
   document.getElementById('windowCount').textContent =
     windowCount === 1 ? 'across 1 window' : `across ${windowCount} windows`;
 
-  document.getElementById('rankTitle').textContent = rank.title;
-  document.getElementById('rankQuote').textContent = `"${rank.quote}"`;
-
-  const next = ranks[rankIdx + 1];
-  const prog = document.getElementById('rankProg');
-  if (next) {
-    prog.hidden = false;
-    const pct = Math.min(100, ((tabCount - rank.min) / (next.min - rank.min)) * 100);
-    const fill = document.getElementById('progFill');
-    fill.style.width = pct.toFixed(1) + '%';
-    fill.style.background = TH_BADGE_COLORS[rank.tone] || '#ffd700';
-    document.getElementById('progMeta').innerHTML =
-      `<span>${rank.min}</span><span>${Math.max(0, next.min - tabCount)} to <b>${next.title}</b></span><span>${next.min}</span>`;
-  } else {
-    prog.hidden = true;
-  }
-
   document.getElementById('allTimeHigh').textContent = ath > 0 ? ath : '—';
   document.getElementById('allTimeHighDate').textContent = athDate || '—';
 
-  const color = TH_BADGE_COLORS[rank.tone] || '#ffd700';
+  const color = TH_BADGE_COLORS[tone] || '#ffd700';
   document.getElementById('sparkline').innerHTML = sparklineSVG(trend || [], color);
-
-  const defs = definitions || TH_ACHIEVEMENTS;
-  const unlocked = defs.filter(a => achievements[a.id] && achievements[a.id].unlocked).length;
-  document.getElementById('achCount').textContent = `${unlocked} / ${defs.length}`;
-
-  const grid = document.getElementById('achievementsGrid');
-  grid.innerHTML = '';
-  const showHints = settings ? settings.showHints !== false : true;
-  for (const ach of defs) {
-    const on = achievements[ach.id] && achievements[ach.id].unlocked;
-    const card = document.createElement('div');
-    card.className = 'achievement ' + (on ? 'unlocked' : 'locked');
-    const date = on ? achievements[ach.id].date : '';
-    const tip = on
-      ? `<strong>${ach.icon} ${ach.name}</strong>${ach.desc}<span class="tip-date">${date}</span>`
-      : `<strong>${ach.name}</strong>${showHints ? ach.hint : ach.desc}`;
-    card.innerHTML = `
-      <div class="achievement-icon">${on ? ach.icon : '?'}</div>
-      <div class="achievement-tooltip">${tip}</div>`;
-    grid.appendChild(card);
-  }
 }
 
 function refresh() {
