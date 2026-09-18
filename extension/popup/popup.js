@@ -10,24 +10,6 @@ function toneClass(tone) {
   return 'purple';
 }
 
-function last14Days(samples) {
-  const now = Date.now();
-  const dayMs = 86400000;
-  const byDay = {};
-  (samples || []).forEach(s => {
-    const daysAgo = Math.floor((now - s.ts) / dayMs);
-    if (daysAgo >= 0 && daysAgo < 14) {
-      if (!byDay[daysAgo] || s.ts > byDay[daysAgo].ts) byDay[daysAgo] = s;
-    }
-  });
-  const out = [];
-  for (let i = 13; i >= 0; i--) {
-    const s = byDay[i];
-    out.push({ t: s ? s.t : 0 });
-  }
-  return out;
-}
-
 function sparklineSVG(data, color) {
   const w = 132, h = 28, pad = 2;
   const nonZero = data.filter(d => d.t > 0);
@@ -57,7 +39,7 @@ function render(data) {
   if (!data) return;
   const {
     tabCount, windowCount, rank, rankIdx, ath, athDate,
-    achievements, samples, definitions, ranks, settings
+    achievements, trend, definitions, ranks, settings
   } = data;
 
   const el = document.getElementById('tabCount');
@@ -88,7 +70,7 @@ function render(data) {
   document.getElementById('allTimeHighDate').textContent = athDate || '—';
 
   const color = TH_BADGE_COLORS[rank.tone] || '#ffd700';
-  document.getElementById('sparkline').innerHTML = sparklineSVG(last14Days(samples), color);
+  document.getElementById('sparkline').innerHTML = sparklineSVG(trend || [], color);
 
   const defs = definitions || TH_ACHIEVEMENTS;
   const unlocked = defs.filter(a => achievements[a.id] && achievements[a.id].unlocked).length;
@@ -103,18 +85,62 @@ function render(data) {
     card.className = 'achievement ' + (on ? 'unlocked' : 'locked');
     const date = on ? achievements[ach.id].date : '';
     const tip = on
-      ? `<strong>${ach.icon} ${ach.name}</strong>${ach.desc}<br><span style="color:#555;font-size:8px">${date}</span>`
+      ? `<strong>${ach.icon} ${ach.name}</strong>${ach.desc}<span class="tip-date">${date}</span>`
       : `<strong>${ach.name}</strong>${showHints ? ach.hint : ach.desc}`;
     card.innerHTML = `
       <div class="achievement-icon">${on ? ach.icon : '?'}</div>
-      <div class="achievement-name">${on ? ach.name : '???'}</div>
       <div class="achievement-tooltip">${tip}</div>`;
     grid.appendChild(card);
   }
 }
 
+function refresh() {
+  return api.runtime.sendMessage({ type: 'GET_STATE' }).then(data => {
+    document.getElementById('loadError').hidden = !!data;
+    render(data);
+  }).catch(err => {
+    console.error(err);
+    document.getElementById('loadError').hidden = false;
+  });
+}
+
+// Live count on the destructive button so it never closes tabs blind.
+let oldSeq = 0;
+function updateOldCount() {
+  const btn = document.getElementById('closeOldTabs');
+  const maxAge = parseInt(document.getElementById('ageThreshold').value, 10);
+  const seq = ++oldSeq;
+  return api.runtime.sendMessage({ type: 'CLOSE_OLD_TABS', maxAge, dryRun: true }).then(r => {
+    if (seq !== oldSeq) return;
+    const n = (r && r.count) || 0;
+    btn.textContent = n ? `Close ${n} Old` : 'No Old Tabs';
+    btn.disabled = n === 0;
+  }).catch(() => {
+    if (seq !== oldSeq) return;
+    btn.textContent = 'Close Old Tabs';
+    btn.disabled = false;
+  });
+}
+
+// Busy label -> send -> result label -> refresh counts -> restore after 2s.
+async function runAction(btn, message, busy, doneLabel, reset) {
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = busy;
+  let label = original;
+  try {
+    label = doneLabel(await api.runtime.sendMessage(message));
+  } catch (err) {
+    console.error(err);
+  }
+  btn.textContent = label;
+  await refresh();
+  setTimeout(reset || (() => { btn.textContent = original; btn.disabled = false; }), 2000);
+}
+
 document.addEventListener('DOMContentLoaded', () => {
-  api.runtime.sendMessage({ type: 'GET_STATE' }).then(render).catch(console.error);
+  refresh();
+  updateOldCount();
 
   document.getElementById('btnHistory').addEventListener('click', () => {
     api.tabs.create({ url: api.runtime.getURL('history/history.html') });
@@ -125,45 +151,20 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   document.getElementById('lnkDupes').addEventListener('click', e => {
-    e.preventDefault();
-    const link = e.currentTarget;
-    const original = link.textContent;
-    link.textContent = 'closing…';
-    api.runtime.sendMessage({ type: 'DEDUPE_TABS' }).then(response => {
-      const count = (response && response.closed) || 0;
-      link.textContent = count === 0 ? 'no dupes' : `closed ${count}`;
-      setTimeout(() => { link.textContent = original; }, 2000);
-    }).catch(() => { link.textContent = original; });
+    runAction(e.currentTarget, { type: 'DEDUPE_TABS' }, 'Closing…',
+      r => (r && r.closed) ? `Closed ${r.closed}` : 'No Dupes');
   });
 
   document.getElementById('btnMerge').addEventListener('click', e => {
-    e.preventDefault();
-    const link = e.currentTarget;
-    const original = link.textContent;
-    link.textContent = 'merging\u2026';
-    api.runtime.sendMessage({ type: 'MERGE_WINDOWS' }).then(response => {
-      const count = (response && response.merged) || 0;
-      const closed = (response && response.closed) || 0;
-      if (response && response.merged > 0) {
-        api.runtime.sendMessage({ type: 'REFRESH' });
-      }
-      link.textContent = count === 0 ? 'none found' : `merged ${count}`;
-      setTimeout(() => { link.textContent = original; }, 2000);
-    }).catch(() => { link.textContent = original; });
+    runAction(e.currentTarget, { type: 'MERGE_WINDOWS' }, 'Merging…',
+      r => (r && r.merged) ? `Merged ${r.merged}` : 'None Found');
   });
 
-  document.getElementById('closeOldTabs').addEventListener('click', () => {
-    const btn = document.getElementById('closeOldTabs');
-    const ms = parseInt(document.getElementById('ageThreshold').value, 10);
-    btn.disabled = true;
-    btn.textContent = 'Closing\u2026';
-    api.runtime.sendMessage({ type: 'CLOSE_OLD_TABS', maxAge: ms }).then(response => {
-      const count = (response && response.closed) || 0;
-      btn.textContent = count === 0 ? 'None found' : `Closed ${count}`;
-      setTimeout(() => { btn.textContent = 'Close Old Tabs'; btn.disabled = false; }, 2000);
-    }).catch(() => {
-      btn.textContent = 'Close Old Tabs';
-      btn.disabled = false;
-    });
+  document.getElementById('ageThreshold').addEventListener('change', updateOldCount);
+
+  document.getElementById('closeOldTabs').addEventListener('click', e => {
+    const maxAge = parseInt(document.getElementById('ageThreshold').value, 10);
+    runAction(e.currentTarget, { type: 'CLOSE_OLD_TABS', maxAge }, 'Closing…',
+      r => (r && r.closed) ? `Closed ${r.closed}` : 'None Found', updateOldCount);
   });
 });

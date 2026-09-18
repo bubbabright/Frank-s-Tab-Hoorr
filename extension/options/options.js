@@ -26,7 +26,7 @@ async function load() {
   document.getElementById('dedupeKeepActive').checked = s.dedupeKeepActive !== false;
   const bytes = JSON.stringify(data).length;
   document.getElementById('storageMeta').textContent =
-    `local only · v0.5.0 · ~${(bytes / 1024).toFixed(1)} KB used`;
+    `local only · v0.5.1 · ~${(bytes / 1024).toFixed(1)} KB used`;
 }
 
 async function saveFromUI() {

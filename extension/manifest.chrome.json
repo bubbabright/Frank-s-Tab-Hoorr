@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Tab Hoor",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Find out exactly what kind of hoor you are. Track your tabs, earn your rank, own it \u2014 all local.",
   "icons": {
     "16": "icons/icon-16.png",

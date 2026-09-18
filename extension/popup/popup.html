@@ -15,14 +15,37 @@
       </div>
     </header>
 
-    <section class="score-section">
-      <div class="tab-count" id="tabCount">—</div>
-      <div class="count-label">tabs open</div>
-      <div class="window-count" id="windowCount"></div>
+    <section class="closer-section">
+      <div class="section-header">
+        <span>FEELING OVERWHELMED?</span>
+      </div>
+      <div class="closer-row">
+        <button type="button" id="lnkDupes">Close Dupes</button>
+        <button type="button" id="btnMerge">Merge Windows</button>
+      </div>
+      <div class="closer-row">
+        <select id="ageThreshold" title="Close tabs not used for">
+          <option value="3600000">1 hour</option>
+          <option value="21600000">6 hours</option>
+          <option value="43200000">12 hours</option>
+          <option value="86400000" selected>24 hours</option>
+          <option value="172800000">48 hours</option>
+          <option value="604800000">7 days</option>
+        </select>
+        <button type="button" id="closeOldTabs">Close Old Tabs</button>
+      </div>
     </section>
 
-    <section class="rank-section">
-      <div class="rank-label">YOUR RANK</div>
+    <div class="load-error" id="loadError" hidden>Couldn't load stats. Close and reopen the popup.</div>
+
+    <section class="score-section">
+      <div class="score-main">
+        <div class="tab-count" id="tabCount">—</div>
+        <div class="score-side">
+          <div class="count-label">tabs open</div>
+          <div class="window-count" id="windowCount"></div>
+        </div>
+      </div>
       <div class="rank-title" id="rankTitle">…</div>
       <div class="rank-quote" id="rankQuote">…</div>
       <div class="prog" id="rankProg" hidden>
@@ -51,31 +74,6 @@
       </div>
       <div class="achievements-grid" id="achievementsGrid"></div>
     </section>
-
-    <section class="closer-section">
-      <div class="section-header">
-        <span>CLEANSE</span>
-      </div>
-      <div class="closer-row">
-        <select id="ageThreshold">
-          <option value="3600000">1 hour</option>
-          <option value="21600000">6 hours</option>
-          <option value="43200000">12 hours</option>
-          <option value="86400000" selected>24 hours</option>
-          <option value="172800000">48 hours</option>
-          <option value="604800000">7 days</option>
-        </select>
-        <button id="closeOldTabs">Close Old Tabs</button>
-      </div>
-      <div class="closer-row">
-        <button id="btnMerge">Merge Windows</button>
-        <button id="lnkDupes">Close Dupes</button>
-      </div>
-    </section>
-
-    <footer>
-      <div class="footer-text">feeling overwhelmed?</div>
-    </footer>
   </div>
   <script src="../lib/browser-polyfill.min.js"></script>
   <script src="../data.js"></script>

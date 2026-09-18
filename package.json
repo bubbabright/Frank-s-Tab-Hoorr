@@ -1,6 +1,6 @@
 {
   "name": "tab-hoor",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
   "description": "Tab Hoor browser extension (Firefox + Chrome)",
   "scripts": {

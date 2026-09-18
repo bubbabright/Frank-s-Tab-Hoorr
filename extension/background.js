@@ -342,7 +342,7 @@ api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           ath: data.ath || 0,
           athDate: data.athDate || '',
           achievements: data.achievements || {},
-          samples: data.samples || [],
+          trend: thTrend14(data.samples),
           settings,
           definitions: TH_ACHIEVEMENTS,
           ranks: TH_RANKS
@@ -374,13 +374,15 @@ api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg && msg.type === 'CLOSE_OLD_TABS') {
     const cutoff = Date.now() - msg.maxAge;
     api.tabs.query({}).then(tabs => {
-      const oldTabs = tabs.filter(t => !t.active && !t.pinned && t.lastAccessed < cutoff);
-      const ids = oldTabs.map(t => t.id);
+      const ids = tabs
+        .filter(t => !t.active && !t.pinned && t.lastAccessed < cutoff)
+        .map(t => t.id);
+      if (msg.dryRun) return sendResponse({ count: ids.length });
       return api.tabs.remove(ids).then(() => {
         sendResponse({ closed: ids.length });
       });
     }).catch(() => {
-      sendResponse({ closed: 0 });
+      sendResponse(msg.dryRun ? { count: 0 } : { closed: 0 });
     });
     return true;
   }

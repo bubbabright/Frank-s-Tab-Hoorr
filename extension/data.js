@@ -93,6 +93,20 @@ function thParseGroupingRules(text) {
     .filter(Boolean);
 }
 
+// Last sample per day for the past 14 days, oldest first: [{t}] x14 (t = 0 when a day has no sample).
+function thTrend14(samples) {
+  const now = Date.now();
+  const dayMs = 86400000;
+  const byDay = {};
+  (samples || []).forEach(s => {
+    const daysAgo = Math.floor((now - s.ts) / dayMs);
+    if (daysAgo >= 0 && daysAgo < 14 && (!byDay[daysAgo] || s.ts > byDay[daysAgo].ts)) byDay[daysAgo] = s;
+  });
+  const out = [];
+  for (let i = 13; i >= 0; i--) out.push({ t: byDay[i] ? byDay[i].t : 0 });
+  return out;
+}
+
 // Registrable-ish domain of an http(s) URL, e.g. manifest.hoboguppy.com -> hoboguppy.com. null otherwise.
 // No public-suffix list: a small set of common two-level suffixes keeps co.uk-style domains sane.
 const TH_TWO_LEVEL_SUFFIXES = new Set([
@@ -142,4 +156,5 @@ if (typeof globalThis !== 'undefined') {
   globalThis.thParseGroupingRules = thParseGroupingRules;
   globalThis.thNormalizeUrl = thNormalizeUrl;
   globalThis.thDomainOf = thDomainOf;
+  globalThis.thTrend14 = thTrend14;
 }
