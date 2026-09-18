@@ -39,7 +39,14 @@ const TH_DEFAULT_SETTINGS = {
   idleEnabled: false,   // auto-close/discard idle tabs (ported from FFTabClose)
   idleMinutes: 30,
   groupingEnabled: false, // auto tab grouping by hostname rule, Firefox only (ported from firefox-auto-tab-grouping)
-  groupingRules: ''       // newline-separated "pattern => Group Name"
+  groupingRules: '',      // newline-separated "pattern => Group Name"
+  groupingAuto: false,    // also group any 2+ tabs sharing a domain, named after the domain
+  dedupeIgnoreHash: true,   // treat http://x.com/ and http://x.com/#foo as the same tab
+  dedupeIgnoreQuery: false, // treat http://x.com/?a=1 and http://x.com/?a=2 as the same tab
+  dedupeIgnoreWww: false,   // treat http://www.x.com and http://x.com as the same tab
+  dedupeCaseInsensitive: false,
+  dedupeKeepPinned: true,   // prefer keeping a pinned tab over a non-pinned duplicate
+  dedupeKeepActive: true    // prefer keeping the active tab over a background duplicate
 };
 
 function thRankFor(n) {
@@ -86,13 +93,35 @@ function thParseGroupingRules(text) {
     .filter(Boolean);
 }
 
-// Strip hash + trailing slash so http://x.com/ and http://x.com/#foo count as the same tab.
-function thNormalizeUrl(url) {
+// Registrable-ish domain of an http(s) URL, e.g. manifest.hoboguppy.com -> hoboguppy.com. null otherwise.
+// No public-suffix list: a small set of common two-level suffixes keeps co.uk-style domains sane.
+const TH_TWO_LEVEL_SUFFIXES = new Set([
+  'co.uk', 'org.uk', 'ac.uk', 'gov.uk', 'com.au', 'net.au', 'org.au',
+  'co.nz', 'co.jp', 'co.in', 'com.br', 'co.za', 'com.mx', 'com.cn'
+]);
+function thDomainOf(url) {
+  let u;
+  try { u = new URL(url); } catch (_) { return null; }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+  const host = u.hostname.toLowerCase();
+  if (!host || !host.includes('.') || /^[\d.]+$/.test(host) || host.includes(':')) return host || null;
+  const labels = host.split('.');
+  const keep = TH_TWO_LEVEL_SUFFIXES.has(labels.slice(-2).join('.')) ? 3 : 2;
+  return labels.slice(-keep).join('.');
+}
+
+// Builds a dedupe match key for a tab URL per the dedupe* settings toggles.
+// Trailing slash on a bare path is always stripped; hash is stripped by default.
+function thNormalizeUrl(url, settings) {
+  settings = settings || {};
   try {
     const u = new URL(url);
-    u.hash = '';
+    if (settings.dedupeIgnoreHash !== false) u.hash = '';
+    if (settings.dedupeIgnoreQuery) u.search = '';
+    if (settings.dedupeIgnoreWww) u.hostname = u.hostname.replace(/^www\./, '');
     let s = u.toString();
     if (s.endsWith('/') && u.pathname === '/') s = s.slice(0, -1);
+    if (settings.dedupeCaseInsensitive) s = s.toLowerCase();
     return s;
   } catch (_) {
     return url;
@@ -112,4 +141,5 @@ if (typeof globalThis !== 'undefined') {
   globalThis.thSamplingMinutes = thSamplingMinutes;
   globalThis.thParseGroupingRules = thParseGroupingRules;
   globalThis.thNormalizeUrl = thNormalizeUrl;
+  globalThis.thDomainOf = thDomainOf;
 }

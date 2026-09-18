@@ -162,17 +162,19 @@ async function ensureSamplingAlarm(settings) {
 // ── duplicate tabs (ported from duplicate-tabs-closer, minimal: exact URL match) ──────────────
 
 async function dedupeTabs() {
+  const settings = await getSettings();
   const tabs = await api.tabs.query({});
   const seen = new Map(); // normalized url -> tab to keep
   const closeIds = [];
-  // Prefer keeping the active tab of a group, then the oldest tab id.
+  // Prefer keeping a pinned tab, then the active tab, then the oldest tab id.
   const sorted = tabs.slice().sort((a, b) => {
-    if (a.active !== b.active) return a.active ? -1 : 1;
+    if (settings.dedupeKeepPinned && a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+    if (settings.dedupeKeepActive && a.active !== b.active) return a.active ? -1 : 1;
     return (a.id || 0) - (b.id || 0);
   });
   for (const tab of sorted) {
     if (!tab.url) continue;
-    const key = thNormalizeUrl(tab.url);
+    const key = thNormalizeUrl(tab.url, settings);
     if (seen.has(key)) {
       closeIds.push(tab.id);
     } else {
@@ -228,27 +230,57 @@ async function groupTabIfMatch(tab) {
   if (!api.tabGroups || !tab || !tab.url) return;
   const settings = await getSettings();
   if (!settings.groupingEnabled) return;
-  const rules = thParseGroupingRules(settings.groupingRules);
-  if (!rules.length) return;
+  // Pinned tabs can't be grouped; tab already in a group? Leave it alone rather than re-shuffling.
+  if (tab.pinned || (tab.groupId && tab.groupId !== -1)) return;
 
   let hostname;
   try { hostname = new URL(tab.url).hostname.toLowerCase(); } catch (_) { return; }
-  const rule = rules.find(r => hostname.includes(r.pattern));
-  if (!rule) return;
-  // Tab already in a group? Leave it alone rather than re-shuffling.
-  if (tab.groupId && tab.groupId !== -1) return;
+  const rule = thParseGroupingRules(settings.groupingRules).find(r => hostname.includes(r.pattern));
+
+  // Explicit rules win; otherwise auto mode names the group after the domain,
+  // but only once 2+ tabs share it so lone tabs don't each get their own group.
+  let name = rule && rule.name;
+  let auto = false;
+  if (!name && settings.groupingAuto) {
+    name = thDomainOf(tab.url);
+    auto = true;
+  }
+  if (!name) return;
 
   try {
-    const groups = await api.tabGroups.query({ windowId: tab.windowId, title: rule.name });
+    const groups = await api.tabGroups.query({ windowId: tab.windowId, title: name });
     if (groups && groups.length) {
       await api.tabs.group({ tabIds: [tab.id], groupId: groups[0].id });
-    } else {
-      const groupId = await api.tabs.group({ tabIds: [tab.id] });
-      await api.tabGroups.update(groupId, { title: rule.name });
+      return;
     }
+    let tabIds = [tab.id];
+    if (auto) {
+      const all = await api.tabs.query({ windowId: tab.windowId });
+      const siblings = all.filter(t =>
+        t.id !== tab.id && !t.pinned && (!t.groupId || t.groupId === -1) && thDomainOf(t.url) === name);
+      if (!siblings.length) return;
+      tabIds = tabIds.concat(siblings.map(t => t.id));
+    }
+    const groupId = await api.tabs.group({ tabIds });
+    await api.tabGroups.update(groupId, { title: name });
   } catch (err) {
     console.error('Tab Hoor groupTabIfMatch', err);
   }
+}
+
+// Serialize so two events for one tab can't both create a same-named group.
+let groupChain = Promise.resolve();
+function queueGroup(tab) {
+  groupChain = groupChain
+    .then(() => groupTabIfMatch(tab))
+    .catch(err => console.error('Tab Hoor queueGroup', err));
+  return groupChain;
+}
+
+async function groupExistingTabs() {
+  if (!api.tabGroups) return;
+  const tabs = await api.tabs.query({});
+  for (const tab of tabs) await queueGroup(tab);
 }
 
 // ── merge windows ────────────────────────────────────────────────────────────
@@ -365,14 +397,19 @@ api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
 // ── events ───────────────────────────────────────────────────────────────────
 
-api.tabs.onCreated.addListener(() => { refreshCounts(); });
+api.tabs.onCreated.addListener(tab => { refreshCounts(); queueGroup(tab); });
 api.tabs.onRemoved.addListener(() => { refreshCounts(); });
 api.tabs.onReplaced.addListener(() => { refreshCounts(); });
 api.windows.onCreated.addListener(() => { refreshCounts(); });
 api.windows.onRemoved.addListener(() => { refreshCounts(); });
 
+// status 'complete' also covers reloads and same-URL navigations, which never report changeInfo.url.
 api.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (changeInfo.url) groupTabIfMatch(tab);
+  if (changeInfo.url || changeInfo.status === 'complete') queueGroup(tab);
+});
+
+api.tabs.onActivated.addListener(({ tabId }) => {
+  api.tabs.get(tabId).then(queueGroup).catch(() => {});
 });
 
 api.alarms.onAlarm.addListener(alarm => {
@@ -393,6 +430,11 @@ api.storage.onChanged.addListener((changes, area) => {
     ensureIdleAlarm(s);
     // Never badge from stale in-memory count (was painting "0" on settings save).
     refreshCounts();
+    const old = changes.settings.oldValue || {};
+    if (s.groupingEnabled && (!old.groupingEnabled || old.groupingRules !== s.groupingRules ||
+        old.groupingAuto !== s.groupingAuto)) {
+      groupExistingTabs().catch(err => console.error('Tab Hoor groupExistingTabs', err));
+    }
   }
 });
 
@@ -404,6 +446,7 @@ api.runtime.onInstalled.addListener(async () => {
   await ensureIdleAlarm(Object.assign({}, TH_DEFAULT_SETTINGS, data.settings || {}));
   await refreshCounts();
   setTimeout(() => recordSample(), 1500);
+  groupExistingTabs().catch(err => console.error('Tab Hoor groupExistingTabs', err));
 });
 
 api.runtime.onStartup.addListener(async () => {
@@ -412,6 +455,7 @@ api.runtime.onStartup.addListener(async () => {
   await ensureIdleAlarm(Object.assign({}, TH_DEFAULT_SETTINGS, data.settings || {}));
   await refreshCounts();
   setTimeout(() => recordSample(), 1500);
+  groupExistingTabs().catch(err => console.error('Tab Hoor groupExistingTabs', err));
 });
 
 // Cold start (service worker wake)

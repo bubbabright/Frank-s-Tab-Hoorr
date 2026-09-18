@@ -18,9 +18,15 @@ async function load() {
   document.getElementById('idleMinutes').value = String(s.idleMinutes || 30);
   document.getElementById('groupingEnabled').checked = !!s.groupingEnabled;
   document.getElementById('groupingRules').value = s.groupingRules || '';
+  document.getElementById('groupingAuto').checked = !!s.groupingAuto;
+  document.getElementById('dedupeIgnoreQuery').checked = !!s.dedupeIgnoreQuery;
+  document.getElementById('dedupeIgnoreWww').checked = !!s.dedupeIgnoreWww;
+  document.getElementById('dedupeCaseInsensitive').checked = !!s.dedupeCaseInsensitive;
+  document.getElementById('dedupeKeepPinned').checked = s.dedupeKeepPinned !== false;
+  document.getElementById('dedupeKeepActive').checked = s.dedupeKeepActive !== false;
   const bytes = JSON.stringify(data).length;
   document.getElementById('storageMeta').textContent =
-    `local only · v0.4.0 · ~${(bytes / 1024).toFixed(1)} KB used`;
+    `local only · v0.5.0 · ~${(bytes / 1024).toFixed(1)} KB used`;
 }
 
 async function saveFromUI() {
@@ -32,7 +38,13 @@ async function saveFromUI() {
     idleEnabled: document.getElementById('idleEnabled').checked,
     idleMinutes: parseInt(document.getElementById('idleMinutes').value, 10) || 30,
     groupingEnabled: document.getElementById('groupingEnabled').checked,
-    groupingRules: document.getElementById('groupingRules').value
+    groupingRules: document.getElementById('groupingRules').value,
+    groupingAuto: document.getElementById('groupingAuto').checked,
+    dedupeIgnoreQuery: document.getElementById('dedupeIgnoreQuery').checked,
+    dedupeIgnoreWww: document.getElementById('dedupeIgnoreWww').checked,
+    dedupeCaseInsensitive: document.getElementById('dedupeCaseInsensitive').checked,
+    dedupeKeepPinned: document.getElementById('dedupeKeepPinned').checked,
+    dedupeKeepActive: document.getElementById('dedupeKeepActive').checked
   };
   await api.storage.local.set({ settings });
   setStatus('Saved.');
@@ -48,7 +60,9 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   [
     'badgeMode', 'sampling', 'retention', 'showHints',
-    'idleEnabled', 'idleMinutes', 'groupingEnabled', 'groupingRules'
+    'idleEnabled', 'idleMinutes', 'groupingEnabled', 'groupingRules', 'groupingAuto',
+    'dedupeIgnoreQuery', 'dedupeIgnoreWww', 'dedupeCaseInsensitive',
+    'dedupeKeepPinned', 'dedupeKeepActive'
   ].forEach(id => {
     document.getElementById(id).addEventListener('change', saveFromUI);
   });

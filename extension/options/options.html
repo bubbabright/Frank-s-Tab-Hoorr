@@ -9,7 +9,7 @@
   <div class="wrap">
     <header>
       <div class="logo">TAB HOOR <span>/ settings</span></div>
-      <div class="meta" id="storageMeta">local only · v0.3.0</div>
+      <div class="meta" id="storageMeta">local only · v0.5.0</div>
     </header>
 
     <main>
@@ -74,9 +74,38 @@
           <input type="checkbox" id="groupingEnabled" />
           <span>Enable auto grouping</span>
         </label>
+        <label class="check">
+          <input type="checkbox" id="groupingAuto" />
+          <span>Also auto-group by domain (2+ tabs of the same site, group named after the domain; rules below win)</span>
+        </label>
         <label class="field field-stack">
           <span>Rules</span>
           <textarea id="groupingRules" rows="5" placeholder="github.com => Dev&#10;youtube.com => Media"></textarea>
+        </label>
+      </section>
+
+      <section class="card">
+        <h2>Close duplicate tabs</h2>
+        <p class="help">Used by the "Close Dupes" button in the popup. Controls which tabs count as duplicates and which one gets kept.</p>
+        <label class="check">
+          <input type="checkbox" id="dedupeIgnoreQuery" />
+          <span>Ignore query string (?a=1)</span>
+        </label>
+        <label class="check">
+          <input type="checkbox" id="dedupeIgnoreWww" />
+          <span>Ignore leading "www."</span>
+        </label>
+        <label class="check">
+          <input type="checkbox" id="dedupeCaseInsensitive" />
+          <span>Case-insensitive match</span>
+        </label>
+        <label class="check">
+          <input type="checkbox" id="dedupeKeepPinned" />
+          <span>Prefer keeping pinned tabs</span>
+        </label>
+        <label class="check">
+          <input type="checkbox" id="dedupeKeepActive" />
+          <span>Prefer keeping the active tab</span>
         </label>
       </section>
 
