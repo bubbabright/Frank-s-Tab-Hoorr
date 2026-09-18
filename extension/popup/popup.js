@@ -113,18 +113,6 @@ function render(data) {
   }
 }
 
-function browserLinks() {
-  const isChrome = !/firefox/i.test(navigator.userAgent);
-  return {
-    dupes: isChrome
-      ? 'https://chromewebstore.google.com/detail/duplicate-tab-helper/ojkcdipcgfaekbeaelaapakgnjflfglf'
-      : 'https://addons.mozilla.org/firefox/addon/duplicate-tabs-closer/',
-    merge: isChrome
-      ? 'https://chromewebstore.google.com/detail/tab-manager-plus-for-chro/cnkdjjdmfiffagllbiiilooaoofcoeff'
-      : 'https://addons.mozilla.org/firefox/addon/merge/'
-  };
-}
-
 document.addEventListener('DOMContentLoaded', () => {
   api.runtime.sendMessage({ type: 'GET_STATE' }).then(render).catch(console.error);
 
@@ -136,13 +124,46 @@ document.addEventListener('DOMContentLoaded', () => {
     else api.tabs.create({ url: api.runtime.getURL('options/options.html') });
   });
 
-  const links = browserLinks();
   document.getElementById('lnkDupes').addEventListener('click', e => {
     e.preventDefault();
-    api.tabs.create({ url: links.dupes });
+    const link = e.currentTarget;
+    const original = link.textContent;
+    link.textContent = 'closing…';
+    api.runtime.sendMessage({ type: 'DEDUPE_TABS' }).then(response => {
+      const count = (response && response.closed) || 0;
+      link.textContent = count === 0 ? 'no dupes' : `closed ${count}`;
+      setTimeout(() => { link.textContent = original; }, 2000);
+    }).catch(() => { link.textContent = original; });
   });
-  document.getElementById('lnkMerge').addEventListener('click', e => {
+
+  document.getElementById('btnMerge').addEventListener('click', e => {
     e.preventDefault();
-    api.tabs.create({ url: links.merge });
+    const link = e.currentTarget;
+    const original = link.textContent;
+    link.textContent = 'merging\u2026';
+    api.runtime.sendMessage({ type: 'MERGE_WINDOWS' }).then(response => {
+      const count = (response && response.merged) || 0;
+      const closed = (response && response.closed) || 0;
+      if (response && response.merged > 0) {
+        api.runtime.sendMessage({ type: 'REFRESH' });
+      }
+      link.textContent = count === 0 ? 'none found' : `merged ${count}`;
+      setTimeout(() => { link.textContent = original; }, 2000);
+    }).catch(() => { link.textContent = original; });
+  });
+
+  document.getElementById('closeOldTabs').addEventListener('click', () => {
+    const btn = document.getElementById('closeOldTabs');
+    const ms = parseInt(document.getElementById('ageThreshold').value, 10);
+    btn.disabled = true;
+    btn.textContent = 'Closing\u2026';
+    api.runtime.sendMessage({ type: 'CLOSE_OLD_TABS', maxAge: ms }).then(response => {
+      const count = (response && response.closed) || 0;
+      btn.textContent = count === 0 ? 'None found' : `Closed ${count}`;
+      setTimeout(() => { btn.textContent = 'Close Old Tabs'; btn.disabled = false; }, 2000);
+    }).catch(() => {
+      btn.textContent = 'Close Old Tabs';
+      btn.disabled = false;
+    });
   });
 });

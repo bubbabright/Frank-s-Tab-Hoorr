@@ -49,6 +49,38 @@
       </section>
 
       <section class="card">
+        <h2>Idle cleanup</h2>
+        <p class="help">Closes idle normal tabs. Idle pinned tabs are discarded (unloaded, not closed). Active and audio-playing tabs are always safe.</p>
+        <label class="check">
+          <input type="checkbox" id="idleEnabled" />
+          <span>Enable idle cleanup</span>
+        </label>
+        <label class="field">
+          <span>Idle after</span>
+          <select id="idleMinutes">
+            <option value="15">15 minutes</option>
+            <option value="30">30 minutes</option>
+            <option value="60">1 hour</option>
+            <option value="180">3 hours</option>
+            <option value="360">6 hours</option>
+          </select>
+        </label>
+      </section>
+
+      <section class="card" id="groupingCard">
+        <h2>Auto tab grouping <span class="pill">Firefox only</span></h2>
+        <p class="help">One rule per line: <code>pattern =&gt; Group Name</code>. Pattern matches anywhere in the tab's hostname.</p>
+        <label class="check">
+          <input type="checkbox" id="groupingEnabled" />
+          <span>Enable auto grouping</span>
+        </label>
+        <label class="field field-stack">
+          <span>Rules</span>
+          <textarea id="groupingRules" rows="5" placeholder="github.com => Dev&#10;youtube.com => Media"></textarea>
+        </label>
+      </section>
+
+      <section class="card">
         <h2>Achievements</h2>
         <label class="check">
           <input type="checkbox" id="showHints" />

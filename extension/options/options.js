@@ -14,9 +14,13 @@ async function load() {
   document.getElementById('sampling').value = s.sampling;
   document.getElementById('retention').value = s.retention;
   document.getElementById('showHints').checked = s.showHints !== false;
+  document.getElementById('idleEnabled').checked = !!s.idleEnabled;
+  document.getElementById('idleMinutes').value = String(s.idleMinutes || 30);
+  document.getElementById('groupingEnabled').checked = !!s.groupingEnabled;
+  document.getElementById('groupingRules').value = s.groupingRules || '';
   const bytes = JSON.stringify(data).length;
   document.getElementById('storageMeta').textContent =
-    `local only · v0.3.0 · ~${(bytes / 1024).toFixed(1)} KB used`;
+    `local only · v0.4.0 · ~${(bytes / 1024).toFixed(1)} KB used`;
 }
 
 async function saveFromUI() {
@@ -24,7 +28,11 @@ async function saveFromUI() {
     badgeMode: document.getElementById('badgeMode').value,
     sampling: document.getElementById('sampling').value,
     retention: document.getElementById('retention').value,
-    showHints: document.getElementById('showHints').checked
+    showHints: document.getElementById('showHints').checked,
+    idleEnabled: document.getElementById('idleEnabled').checked,
+    idleMinutes: parseInt(document.getElementById('idleMinutes').value, 10) || 30,
+    groupingEnabled: document.getElementById('groupingEnabled').checked,
+    groupingRules: document.getElementById('groupingRules').value
   };
   await api.storage.local.set({ settings });
   setStatus('Saved.');
@@ -34,7 +42,14 @@ async function saveFromUI() {
 
 document.addEventListener('DOMContentLoaded', () => {
   load();
-  ['badgeMode', 'sampling', 'retention', 'showHints'].forEach(id => {
+  if (!api.tabGroups) {
+    const card = document.getElementById('groupingCard');
+    if (card) card.hidden = true;
+  }
+  [
+    'badgeMode', 'sampling', 'retention', 'showHints',
+    'idleEnabled', 'idleMinutes', 'groupingEnabled', 'groupingRules'
+  ].forEach(id => {
     document.getElementById(id).addEventListener('change', saveFromUI);
   });
 

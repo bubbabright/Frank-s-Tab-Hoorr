@@ -35,7 +35,11 @@ const TH_DEFAULT_SETTINGS = {
   badgeMode: 'count',   // count | rank | off
   sampling: '5m',       // 1m | 5m | 15m | evt
   retention: '90d',     // 14d | 30d | 90d | all
-  showHints: true
+  showHints: true,
+  idleEnabled: false,   // auto-close/discard idle tabs (ported from FFTabClose)
+  idleMinutes: 30,
+  groupingEnabled: false, // auto tab grouping by hostname rule, Firefox only (ported from firefox-auto-tab-grouping)
+  groupingRules: ''       // newline-separated "pattern => Group Name"
 };
 
 function thRankFor(n) {
@@ -65,6 +69,36 @@ function thSamplingMinutes(key) {
   return { '1m': 1, '5m': 5, '15m': 15, 'evt': null }[key] ?? 5;
 }
 
+// "example.com => Group Name" per line, blank lines / lines without "=>" ignored.
+function thParseGroupingRules(text) {
+  return (text || '')
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean)
+    .map(line => {
+      const i = line.indexOf('=>');
+      if (i === -1) return null;
+      const pattern = line.slice(0, i).trim().toLowerCase();
+      const name = line.slice(i + 2).trim();
+      if (!pattern || !name) return null;
+      return { pattern, name };
+    })
+    .filter(Boolean);
+}
+
+// Strip hash + trailing slash so http://x.com/ and http://x.com/#foo count as the same tab.
+function thNormalizeUrl(url) {
+  try {
+    const u = new URL(url);
+    u.hash = '';
+    let s = u.toString();
+    if (s.endsWith('/') && u.pathname === '/') s = s.slice(0, -1);
+    return s;
+  } catch (_) {
+    return url;
+  }
+}
+
 // Export for service worker (importScripts) and pages
 if (typeof globalThis !== 'undefined') {
   globalThis.TH_RANKS = TH_RANKS;
@@ -76,4 +110,6 @@ if (typeof globalThis !== 'undefined') {
   globalThis.thFormatDate = thFormatDate;
   globalThis.thRetentionMs = thRetentionMs;
   globalThis.thSamplingMinutes = thSamplingMinutes;
+  globalThis.thParseGroupingRules = thParseGroupingRules;
+  globalThis.thNormalizeUrl = thNormalizeUrl;
 }

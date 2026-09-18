@@ -29,6 +29,13 @@ function setPartial(patch) {
   return api.storage.local.set(patch);
 }
 
+/** Settings-only read — avoids pulling the (potentially 50k-entry) samples blob. */
+function getSettings() {
+  return api.storage.local.get('settings').then(d =>
+    Object.assign({}, TH_DEFAULT_SETTINGS, (d && d.settings) || {})
+  );
+}
+
 // ── badge ────────────────────────────────────────────────────────────────────
 
 function updateBadge(count, settings) {
@@ -179,8 +186,7 @@ async function dedupeTabs() {
 // ── idle tab cleanup (ported from FFTabClose: close idle tabs, discard idle pinned tabs) ──────
 
 async function checkIdleTabs() {
-  const data = await getAll();
-  const settings = Object.assign({}, TH_DEFAULT_SETTINGS, data.settings || {});
+  const settings = await getSettings();
   if (!settings.idleEnabled) return { closed: 0, discarded: 0 };
 
   const thresholdMs = (settings.idleMinutes || 30) * 60000;
@@ -220,8 +226,7 @@ async function ensureIdleAlarm(settings) {
 
 async function groupTabIfMatch(tab) {
   if (!api.tabGroups || !tab || !tab.url) return;
-  const data = await getAll();
-  const settings = Object.assign({}, TH_DEFAULT_SETTINGS, data.settings || {});
+  const settings = await getSettings();
   if (!settings.groupingEnabled) return;
   const rules = thParseGroupingRules(settings.groupingRules);
   if (!rules.length) return;
@@ -244,6 +249,45 @@ async function groupTabIfMatch(tab) {
   } catch (err) {
     console.error('Tab Hoor groupTabIfMatch', err);
   }
+}
+
+// ── merge windows ────────────────────────────────────────────────────────────
+
+async function mergeAllWindows() {
+  const activeWindow = await api.windows.getLastFocused({ windowTypes: ['normal'] });
+  if (!activeWindow) return { merged: 0, closed: 0 };
+
+  const allTabs = await api.tabs.query({});
+  const otherTabs = allTabs.filter(t => t.windowId !== activeWindow.id);
+  if (!otherTabs.length) return { merged: 0, closed: 0 };
+
+  // tabs.move does not preserve pinned status — record and re-pin afterward.
+  const pinnedIds = new Set(otherTabs.filter(t => t.pinned).map(t => t.id));
+
+  const tabIds = otherTabs.map(t => t.id);
+  await api.tabs.move(tabIds, { windowId: activeWindow.id, index: -1 });
+
+  for (const id of pinnedIds) {
+    try { await api.tabs.update(id, { pinned: true }); }
+    catch (err) { console.error('Tab Hoor merge pin', err); }
+  }
+
+  // Close windows that are now empty. Browsers typically auto-close a window
+  // once its last tab is moved out, so query/remove throwing "no such window"
+  // means it's already gone — that still counts as closed.
+  const otherWindowIds = [...new Set(otherTabs.map(t => t.windowId))];
+  let closed = 0;
+  for (const wid of otherWindowIds) {
+    try {
+      const remaining = await api.tabs.query({ windowId: wid });
+      if (remaining.length === 0) await api.windows.remove(wid);
+    } catch (err) {
+      // Already auto-closed by the browser.
+    }
+    closed++;
+  }
+
+  return { merged: otherTabs.length, closed };
 }
 
 // ── messaging ────────────────────────────────────────────────────────────────
@@ -305,6 +349,15 @@ api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       });
     }).catch(() => {
       sendResponse({ closed: 0 });
+    });
+    return true;
+  }
+  if (msg && msg.type === 'MERGE_WINDOWS') {
+    mergeAllWindows().then(result => {
+      sendResponse({ merged: result.merged, closed: result.closed });
+    }).catch(err => {
+      console.error('Tab Hoor merge windows', err);
+      sendResponse({ merged: 0, closed: 0 });
     });
     return true;
   }
