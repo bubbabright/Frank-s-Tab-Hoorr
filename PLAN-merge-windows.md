@@ -1,3 +1,5 @@
+> **Status: DONE (shipped in v0.4.0).** Kept for reference. Since then the popup wiring changed: the trigger is the `#btnMerge` button, and `MERGE_WINDOWS` also accepts `dryRun` to return `{windows, tabs}` for the live button label. Finished plans move to the Obsidian vault (`07-projects/`) per the projects convention.
+
 # Plan: Add merge windows to Tab Hoor
 
 ## Goal

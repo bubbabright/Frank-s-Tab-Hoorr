@@ -3,3 +3,4 @@ dist/
 *.log
 extension/chrome-key.pem
 extension/.chrome-key-b64
+function-repos/
