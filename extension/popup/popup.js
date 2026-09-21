@@ -69,7 +69,7 @@ const COUNT_BUTTONS = [
     id: 'closeOldTabs',
     fallback: 'Close Old Tabs',
     query: () => ({ type: 'CLOSE_OLD_TABS', maxAge: parseInt(document.getElementById('ageThreshold').value, 10), dryRun: true }),
-    count: r => r.count,
+    count: r => (r.closed || 0) + (r.discarded || 0),
     label: n => (n ? `Close ${n} Old` : 'No Old Tabs')
   },
   {
@@ -123,8 +123,14 @@ async function runAction(btn, message, busy, doneLabel) {
   setTimeout(updateCounts, 2000);
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('version').textContent = 'v' + api.runtime.getManifest().version;
+  
+  const { settings } = await api.storage.local.get('settings');
+  if (settings && settings.popupAgeThreshold) {
+    document.getElementById('ageThreshold').value = String(settings.popupAgeThreshold);
+  }
+
   refresh();
   updateCounts();
 
@@ -146,11 +152,23 @@ document.addEventListener('DOMContentLoaded', () => {
       r => (r && r.merged) ? `Merged ${r.merged}` : 'None Found');
   });
 
-  document.getElementById('ageThreshold').addEventListener('change', updateCounts);
+  document.getElementById('ageThreshold').addEventListener('change', async (e) => {
+    const ms = parseInt(e.target.value, 10);
+    const { settings } = await api.storage.local.get('settings');
+    const next = Object.assign({}, settings || {});
+    next.popupAgeThreshold = ms;
+    await api.storage.local.set({ settings: next });
+    updateCounts();
+  });
 
   document.getElementById('closeOldTabs').addEventListener('click', e => {
     const maxAge = parseInt(document.getElementById('ageThreshold').value, 10);
     runAction(e.currentTarget, { type: 'CLOSE_OLD_TABS', maxAge }, 'Closing…',
-      r => (r && r.closed) ? `Closed ${r.closed}` : 'None Found');
+      r => {
+        if (!r) return 'None Found';
+        const closed = r.closed || 0, discarded = r.discarded || 0;
+        if (!closed && !discarded) return 'None Found';
+        return discarded ? `Closed ${closed}, unloaded ${discarded}` : `Closed ${closed}`;
+      });
   });
 });

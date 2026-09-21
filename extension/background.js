@@ -342,15 +342,26 @@ api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg && msg.type === 'CLOSE_OLD_TABS') {
     const cutoff = Date.now() - msg.maxAge;
     api.tabs.query({}).then(tabs => {
-      const ids = tabs
-        .filter(t => !t.active && !t.pinned && t.lastAccessed < cutoff)
-        .map(t => t.id);
-      if (msg.dryRun) return sendResponse({ count: ids.length });
-      return api.tabs.remove(ids).then(() => {
-        sendResponse({ closed: ids.length });
+      const closeIds = [];
+      const discardIds = [];
+      for (const t of tabs) {
+        if (t.active || t.audible || t.discarded) continue;
+        if (t.lastAccessed < cutoff) {
+          if (t.pinned) discardIds.push(t.id);
+          else closeIds.push(t.id);
+        }
+      }
+      if (msg.dryRun) return sendResponse({ closed: closeIds.length, discarded: discardIds.length });
+      
+      return Promise.all([
+        closeIds.length ? api.tabs.remove(closeIds) : Promise.resolve(),
+        ...discardIds.map(id => api.tabs.discard(id).catch(() => {}))
+      ]).then(() => {
+        sendResponse({ closed: closeIds.length, discarded: discardIds.length });
       });
-    }).catch(() => {
-      sendResponse(msg.dryRun ? { count: 0 } : { closed: 0 });
+    }).catch(err => {
+      console.error('Tab Hoor CLOSE_OLD_TABS', err);
+      sendResponse(msg.dryRun ? { closed: 0, discarded: 0 } : { closed: 0, discarded: 0 });
     });
     return true;
   }

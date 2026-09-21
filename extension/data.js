@@ -22,7 +22,8 @@ const TH_DEFAULT_SETTINGS = {
   dedupeIgnoreWww: false,   // treat http://www.x.com and http://x.com as the same tab
   dedupeCaseInsensitive: false,
   dedupeKeepPinned: true,   // prefer keeping a pinned tab over a non-pinned duplicate
-  dedupeKeepActive: true    // prefer keeping the active tab over a background duplicate
+  dedupeKeepActive: true,    // prefer keeping the active tab over a background duplicate
+  popupAgeThreshold: 86400000 // Default 24h for manual popup action
 };
 
 // Colour tone for a tab count (drives badge, popup count and sparkline colour).
