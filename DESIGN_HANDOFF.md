@@ -4,11 +4,11 @@ Current UI reference (v0.6). The original v0.1 handoff, with the rank/achievemen
 
 ## Surfaces
 
-- **Toolbar badge:** live tab count, coloured by size (or off, see options).
+- **Toolbar icon:** live tab count drawn large into the icon itself, coloured by size (or the plain logo, see badge mode). No browser badge square is used.
 - **Popup** (340px wide, dark): header with version, action buttons, tab count with window count, all-time high and 14-day trend.
   - Actions: Close Dupes, Merge Windows (row 1); a minimum-idle-age select plus Close Old Tabs (row 2). Each label shows how many tabs/windows it would act on and disables at zero.
 - **Options page** (opens in a tab): auto tab grouping, close-duplicates rules, idle cleanup, badge mode, history sampling/retention, data export/import. Changes save immediately with a toast.
-- **History page:** count over time with ranges, chart, per-day list and CSV export.
+- **History page:** count over time with ranges, chart, per-day list, action log (what Tab Hoor closed/discarded/merged, auto or manual) and CSV export.
 
 ## Look
 

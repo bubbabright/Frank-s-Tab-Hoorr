@@ -2,7 +2,7 @@
 'use strict';
 
 const api = globalThis.browser || globalThis.chrome;
-const IMPORT_KEYS = ['settings', 'samples', 'ath', 'athDate', 'installedDate', '_belowAth'];
+const IMPORT_KEYS = ['settings', 'samples', 'actions', 'ath', 'athDate', 'installedDate', '_belowAth'];
 
 const fields = () => Array.from(document.querySelectorAll('[data-setting]'));
 const isPlainObject = v => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -76,6 +76,7 @@ function sanitizeImport(data) {
   const out = {};
   for (const k of IMPORT_KEYS) if (k in data) out[k] = data[k];
   if ('samples' in out && !Array.isArray(out.samples)) throw new Error('samples must be a list');
+  if ('actions' in out && !Array.isArray(out.actions)) throw new Error('actions must be a list');
   if ('ath' in out && typeof out.ath !== 'number') throw new Error('ath must be a number');
   if ('settings' in out) {
     if (!isPlainObject(out.settings)) throw new Error('settings must be an object');

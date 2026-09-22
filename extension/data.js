@@ -118,9 +118,37 @@ function thNormalizeUrl(url, settings) {
   }
 }
 
+// Action log: what Tab Hoor did on its own or on request, and how much it reduced.
+// kind is the stored key; auto marks actions the extension took without the user.
+const TH_ACTION_KINDS = {
+  idle:   { label: 'Idle cleanup',     auto: true },
+  dedupe: { label: 'Duplicates closed', auto: false },
+  old:    { label: 'Old tabs closed',   auto: false },
+  merge:  { label: 'Windows merged',    auto: false }
+};
+
+// Append an action entry, drop entries older than maxAgeMs, and cap the list.
+function thPushAction(actions, entry, maxAgeMs) {
+  let out = (actions || []).slice();
+  out.push(entry);
+  if (maxAgeMs !== Infinity) {
+    const cutoff = Date.now() - maxAgeMs;
+    out = out.filter(a => a.ts >= cutoff);
+  }
+  if (out.length > 500) out = out.slice(-500);
+  return out;
+}
+
+// Total tabs removed by an action entry (merge moves tabs, so it counts 0).
+function thActionTabs(entry) {
+  if (!entry || entry.kind === 'merge') return 0;
+  return (entry.closed || 0) + (entry.discarded || 0);
+}
+
 // Export for service worker (importScripts) and pages
 if (typeof globalThis !== 'undefined') {
   globalThis.TH_BADGE_COLORS = TH_BADGE_COLORS;
+  globalThis.TH_ACTION_KINDS = TH_ACTION_KINDS;
   globalThis.TH_DEFAULT_SETTINGS = TH_DEFAULT_SETTINGS;
   globalThis.thTone = thTone;
   globalThis.thFormatDate = thFormatDate;
@@ -130,4 +158,6 @@ if (typeof globalThis !== 'undefined') {
   globalThis.thNormalizeUrl = thNormalizeUrl;
   globalThis.thDomainOf = thDomainOf;
   globalThis.thTrend14 = thTrend14;
+  globalThis.thPushAction = thPushAction;
+  globalThis.thActionTabs = thActionTabs;
 }

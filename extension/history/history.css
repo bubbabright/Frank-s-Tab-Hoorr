@@ -134,3 +134,33 @@ footer {
 .foot-actions { display: flex; gap: 8px; }
 button.danger { border-color: #5a2020; color: #f0a0a0; }
 button.danger:hover { border-color: var(--danger); color: #fff; }
+
+.act-head, .act-row {
+  display: grid;
+  grid-template-columns: 150px 170px 1fr;
+  gap: 10px;
+  align-items: center;
+}
+.act-head {
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.act-row { font-size: 13px; margin-bottom: 7px; }
+.act-when { color: var(--dim); }
+.act-tag {
+  display: inline-block;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--text);
+}
+.act-tag.auto { color: var(--green); border-color: #1f4d2c; }
+.act-tag.manual { color: var(--gold); border-color: var(--gold-dim); }
+.act-result { color: var(--text); }
+.card-actions { display: flex; justify-content: flex-end; margin-top: 10px; }

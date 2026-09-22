@@ -36,20 +36,96 @@ function getSettings() {
   );
 }
 
-// ── badge ────────────────────────────────────────────────────────────────────
+/** Append one entry to the action log, pruned by the current retention setting. */
+async function logAction(entry) {
+  const data = await getAll();
+  const settings = Object.assign({}, TH_DEFAULT_SETTINGS, data.settings || {});
+  const actions = thPushAction(
+    data.actions,
+    Object.assign({ ts: Date.now() }, entry),
+    thRetentionMs(settings.retention)
+  );
+  await setPartial({ actions });
+}
+
+// ── toolbar icon ─────────────────────────────────────────────────────────────
+
+const ICON_SIZES = [16, 32];
+const DEFAULT_ICON = {
+  16: 'icons/icon-16.png',
+  32: 'icons/icon-32.png',
+  48: 'icons/icon-48.png',
+  96: 'icons/icon-96.png',
+  128: 'icons/icon-128.png'
+};
+
+// What is currently painted, so we don't redraw on every refresh.
+let paintedIcon = null;
+
+function makeCanvas(size) {
+  if (typeof OffscreenCanvas === 'function') return new OffscreenCanvas(size, size);
+  const c = document.createElement('canvas');
+  c.width = size;
+  c.height = size;
+  return c;
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+// Big centred tab count on the dark tile. The browser badge font is fixed and
+// tiny, so the number is drawn into the icon instead of the badge.
+function drawCountIcon(size, count, color) {
+  const ctx = makeCanvas(size).getContext('2d');
+  ctx.clearRect(0, 0, size, size);
+  ctx.fillStyle = '#111111';
+  roundRect(ctx, 0.5, 0.5, size - 1, size - 1, Math.max(2, size * 0.18));
+  ctx.fill();
+
+  const text = count > 999 ? '1k' : String(count);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  let fs = size * 0.92;
+  while (fs > 4) {
+    ctx.font = `bold ${fs}px Arial, sans-serif`;
+    if (ctx.measureText(text).width <= size * 0.86) break;
+    fs -= 1;
+  }
+  ctx.fillStyle = color;
+  ctx.fillText(text, size / 2, size / 2 + size * 0.04);
+  return ctx.getImageData(0, 0, size, size);
+}
+
+async function paintCount(count) {
+  const tone = thTone(count);
+  const color = TH_BADGE_COLORS[tone] || '#ffd700';
+  const key = `count:${count}`;
+  if (paintedIcon === key) return;
+  const imageData = {};
+  for (const size of ICON_SIZES) imageData[size] = drawCountIcon(size, count, color);
+  await api.action.setIcon({ imageData });
+  paintedIcon = key;
+}
+
+async function paintDefaultIcon() {
+  if (paintedIcon === 'default') return;
+  await api.action.setIcon({ path: DEFAULT_ICON });
+  paintedIcon = 'default';
+}
 
 function updateBadge(count, settings) {
   settings = settings || {};
-  const color = TH_BADGE_COLORS[thTone(count)] || '#3db85a';
-  // Avoid flashing "0" while the worker is still querying after a wake; mode 'off' → empty.
-  let text = '';
-  if (countsReady && settings.badgeMode !== 'off') {
-    text = count > 999 ? '999+' : String(count);
-  }
-  return Promise.all([
-    api.action.setBadgeText({ text }),
-    api.action.setBadgeBackgroundColor({ color })
-  ]);
+  // The count lives in the icon now, so the browser badge square is never used.
+  const clear = api.action.setBadgeText({ text: '' });
+  const off = !countsReady || settings.badgeMode === 'off';
+  return Promise.all([clear, off ? paintDefaultIcon() : paintCount(count)]);
 }
 
 // ── counts ───────────────────────────────────────────────────────────────────
@@ -122,7 +198,10 @@ async function ensureSamplingAlarm(settings) {
 
 async function dedupeTabs() {
   const closeIds = await findDupeIds();
-  if (closeIds.length) await api.tabs.remove(closeIds);
+  if (closeIds.length) {
+    await api.tabs.remove(closeIds);
+    await logAction({ kind: 'dedupe', closed: closeIds.length });
+  }
   return closeIds.length;
 }
 
@@ -176,6 +255,9 @@ async function checkIdleTabs() {
   if (closeIds.length) await api.tabs.remove(closeIds);
   for (const id of discardIds) {
     try { await api.tabs.discard(id); } catch (err) { console.error('Tab Hoor discard', err); }
+  }
+  if (closeIds.length || discardIds.length) {
+    await logAction({ kind: 'idle', closed: closeIds.length, discarded: discardIds.length });
   }
   return { closed: closeIds.length, discarded: discardIds.length };
 }
@@ -357,6 +439,9 @@ api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         closeIds.length ? api.tabs.remove(closeIds) : Promise.resolve(),
         ...discardIds.map(id => api.tabs.discard(id).catch(() => {}))
       ]).then(() => {
+        if (!closeIds.length && !discardIds.length) return;
+        return logAction({ kind: 'old', closed: closeIds.length, discarded: discardIds.length });
+      }).then(() => {
         sendResponse({ closed: closeIds.length, discarded: discardIds.length });
       });
     }).catch(err => {
@@ -375,7 +460,8 @@ api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         .catch(() => sendResponse({ windows: 0, tabs: 0 }));
       return true;
     }
-    mergeAllWindows().then(result => {
+    mergeAllWindows().then(async result => {
+      if (result.merged) await logAction({ kind: 'merge', tabs: result.merged, windows: result.closed });
       sendResponse({ merged: result.merged, closed: result.closed });
     }).catch(err => {
       console.error('Tab Hoor merge windows', err);

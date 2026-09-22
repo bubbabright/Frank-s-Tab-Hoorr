@@ -5,6 +5,7 @@ const api = globalThis.browser || globalThis.chrome;
 
 let RANGE = '7d';
 let ALL = [];
+let ALL_ACTIONS = [];
 let ATH = 0;
 let ATH_DATE = '';
 let NOW_T = 0;
@@ -238,6 +239,53 @@ function renderDays() {
   document.getElementById('dayList').innerHTML = html;
 }
 
+function actionTime(ts) {
+  return new Date(ts).toLocaleString(undefined, {
+    month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
+  });
+}
+
+/**
+ * Action log: what Tab Hoor did on its own (idle cleanup) or on request
+ * (dedupe, close old tabs, merge), and how many tabs each one removed.
+ */
+function renderActions() {
+  const titleEl = document.getElementById('actionTitle');
+  const cutoff = RANGE === 'all' ? 0 : Date.now() - rangeMs(RANGE);
+  const rows = ALL_ACTIONS.filter(a => a.ts >= cutoff).slice().reverse();
+  const removed = rows.reduce((n, a) => n + thActionTabs(a), 0);
+
+  if (titleEl) {
+    titleEl.textContent = `Actions · ${rangeLabel(RANGE)} · ${removed} tab${removed === 1 ? '' : 's'} removed`;
+  }
+
+  const list = document.getElementById('actionList');
+  if (!rows.length) {
+    list.innerHTML = '<p class="chart-empty">No actions recorded yet. Close Dupes, Close Old Tabs, Merge Windows and idle cleanup are logged here.</p>';
+    return;
+  }
+
+  let html = '<div class="act-head"><span>When</span><span>Action</span><span>Result</span></div>';
+  rows.forEach(a => {
+    const k = TH_ACTION_KINDS[a.kind] || { label: a.kind, auto: false };
+    let result;
+    if (a.kind === 'merge') {
+      result = `merged ${a.tabs} tab${a.tabs === 1 ? '' : 's'} from ${a.windows} window${a.windows === 1 ? '' : 's'}`;
+    } else {
+      const parts = [];
+      if (a.closed) parts.push(`closed ${a.closed}`);
+      if (a.discarded) parts.push(`unloaded ${a.discarded}`);
+      result = parts.join(', ') || '—';
+    }
+    html += `<div class="act-row">
+      <div class="act-when">${actionTime(a.ts)}</div>
+      <div class="act-kind"><span class="act-tag ${k.auto ? 'auto' : 'manual'}">${k.label}</span></div>
+      <div class="act-result">${result}</div>
+    </div>`;
+  });
+  list.innerHTML = html;
+}
+
 function render() {
   document.querySelectorAll('#ranges button').forEach(b => {
     b.classList.toggle('on', b.dataset.range === RANGE);
@@ -247,15 +295,17 @@ function render() {
   renderStats(s);
   renderChart(samples);
   renderDays();
+  renderActions();
 }
 
 async function boot() {
   const [data, tabs, wins] = await Promise.all([
-    api.storage.local.get(['samples', 'ath', 'athDate']),
+    api.storage.local.get(['samples', 'ath', 'athDate', 'actions']),
     api.tabs.query({}),
     api.windows.getAll({ windowTypes: ['normal'] })
   ]);
   ALL = data.samples || [];
+  ALL_ACTIONS = data.actions || [];
   ATH = data.ath || 0;
   ATH_DATE = data.athDate || '';
   NOW_T = tabs.length;
@@ -289,5 +339,11 @@ document.addEventListener('DOMContentLoaded', () => {
     await api.storage.local.set({ samples: [] });
     ALL = [];
     render();
+  });
+  document.getElementById('btnClearActions').addEventListener('click', async () => {
+    if (!confirm('Clear the action log?')) return;
+    await api.storage.local.set({ actions: [] });
+    ALL_ACTIONS = [];
+    renderActions();
   });
 });
