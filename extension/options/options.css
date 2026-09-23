@@ -16,6 +16,10 @@ body {
   min-height: 100vh;
 }
 .wrap { max-width: 640px; margin: 0 auto; padding: 28px 20px 48px; }
+.brand-header { display: flex; flex-direction: column; gap: 14px; }
+.hero-banner { min-height: 150px; border: 1px solid #3a4227; border-radius: 10px; background: #161814 url('../hero-banner.png') center / cover no-repeat; box-shadow: inset 0 0 0 1px rgba(255, 215, 0, 0.08); }
+.brand-title { display: flex; align-items: center; gap: 10px; }
+.brand-mark { width: 34px; height: 34px; border-radius: 9px; object-fit: cover; }
 header {
   display: flex;
   justify-content: space-between;
