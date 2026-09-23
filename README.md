@@ -22,6 +22,3 @@
 *   **Counts only. No URLs. All local.** We do not store what sites you visit, and no data ever leaves your browser.
 *   **Full Control:** Export your settings as JSON to back them up, or import them later. Clear your history at any time.
 *   **Custom Polling:** Choose how often tab counts are sampled, from "every tab change" (heavy use) to "every 15 minutes" (light use) to keep storage usage low.
-
-## ⚙️ How to Test
-Reviewers can test by opening the popup to see current counts and the cleanup/group/idle buttons, browsing the History tab to see the trend charts and day breakdown, and adjusting the Settings page to see auto-grouping, idle cleanup, dedupe rules, and the storage engine toggle.
