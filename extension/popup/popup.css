@@ -92,6 +92,32 @@ header {
   cursor: pointer;
 }
 .closer-row select:focus { border-color: var(--gold-dim); outline: none; }
+.closer-row input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-family: var(--font-body);
+}
+.closer-row input[type="text"]:focus { border-color: var(--gold-dim); outline: none; }
+.help-icon {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  color: var(--text-dim, #888);
+  font-size: 11px;
+  cursor: help;
+}
+.help-icon:hover, .help-icon:focus { border-color: var(--gold-dim); color: var(--gold); outline: none; }
 .closer-row button {
   flex: 1;
   min-width: 0;

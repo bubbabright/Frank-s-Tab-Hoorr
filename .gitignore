@@ -4,3 +4,5 @@ dist/
 extension/chrome-key.pem
 extension/.chrome-key-b64
 function-repos/
+_abandoned-fork/
+session-ses_*.md

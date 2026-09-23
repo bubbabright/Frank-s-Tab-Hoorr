@@ -39,22 +39,11 @@ function applyDependents() {
   }
 }
 
-function updateRulesInfo() {
-  const text = document.getElementById('groupingRules').value;
-  const lines = text.split('\n').filter(l => l.trim()).length;
-  const rules = thParseGroupingRules(text).length;
-  const bad = lines - rules;
-  document.getElementById('rulesInfo').textContent =
-    `${rules} ${rules === 1 ? 'rule' : 'rules'}` +
-    (bad ? ` · ${bad} ${bad === 1 ? 'line' : 'lines'} ignored (need "pattern => Group Name")` : '');
-}
-
 async function load() {
   const { settings } = await api.storage.local.get('settings');
   const s = Object.assign({}, TH_DEFAULT_SETTINGS, settings || {});
   fields().forEach(el => writeField(el, s[el.dataset.setting]));
   applyDependents();
-  updateRulesInfo();
   let meta = `local only · v${api.runtime.getManifest().version}`;
   if (api.storage.local.getBytesInUse) {
     try { meta += ` · ~${((await api.storage.local.getBytesInUse(null)) / 1024).toFixed(1)} KB used`; } catch (_) {}
@@ -100,17 +89,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   fields().forEach(el => el.addEventListener('change', () => {
     applyDependents();
-    updateRulesInfo();
     saveFromUI();
   }));
-
-  // Save while typing so a rule isn't lost if the tab is closed before blur.
-  let rulesTimer;
-  document.getElementById('groupingRules').addEventListener('input', () => {
-    updateRulesInfo();
-    clearTimeout(rulesTimer);
-    rulesTimer = setTimeout(saveFromUI, 500);
-  });
 
   document.getElementById('btnExport').addEventListener('click', async () => {
     const data = await api.storage.local.get(null);
@@ -146,7 +126,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('btnClearHistory').addEventListener('click', async () => {
     if (!confirm('Clear all history samples? All-time high stays.')) return;
-    await api.storage.local.set({ samples: [] });
+    await api.runtime.sendMessage({ type: 'CLEAR_SAMPLES' });
     await load();
     toast('History cleared');
   });

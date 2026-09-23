@@ -23,6 +23,10 @@
         <button type="button" id="lnkDupes">Close Dupes</button>
         <button type="button" id="btnMerge">Merge Windows</button>
       </div>
+      <div class="closer-row" id="groupRow" hidden>
+        <button type="button" id="btnGroup">Group Tabs</button>
+        <button type="button" id="btnUngroup">Ungroup Tabs</button>
+      </div>
       <div class="closer-row">
         <select id="ageThreshold" title="Close tabs not used for">
           <option value="3600000">1 hour</option>
@@ -33,6 +37,11 @@
           <option value="604800000">7 days</option>
         </select>
         <button type="button" id="closeOldTabs">Close Old Tabs</button>
+      </div>
+      <div class="closer-row">
+        <input type="text" id="idleThreshold" value="30m" placeholder="30m, 1h, 90m, 1d" inputmode="text" />
+        <span class="help-icon" tabindex="0" title="Closes idle normal tabs right now, using the time you typed. Idle pinned tabs are discarded (unloaded, not closed) instead of closed. Active and audio-playing tabs are always safe. Formats: 30m, 1h, 90m, 1d, 2h30m.">?</span>
+        <button type="button" id="btnIdleCleanup">Idle Cleanup</button>
       </div>
     </section>
 

@@ -10,11 +10,24 @@ function toneClass(tone) {
   return 'purple';
 }
 
+const SVG_NS = 'http://www.w3.org/2000/svg';
+function svgEl(tag, attrs, children) {
+  const node = document.createElementNS(SVG_NS, tag);
+  if (attrs) for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+  (children || []).forEach(c => {
+    if (c == null) return;
+    node.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+  });
+  return node;
+}
+
 function sparklineSVG(data, color) {
   const w = 132, h = 28, pad = 2;
   const nonZero = data.filter(d => d.t > 0);
   if (nonZero.length < 2) {
-    return `<svg width="${w}" height="${h}"><text x="4" y="18" font-size="10" fill="#555">no data yet</text></svg>`;
+    return svgEl('svg', { width: w, height: h }, [
+      svgEl('text', { x: 4, y: 18, 'font-size': 10, fill: '#555' }, ['no data yet'])
+    ]);
   }
   const vals = data.map(d => d.t);
   const max = Math.max(...vals);
@@ -28,11 +41,11 @@ function sparklineSVG(data, color) {
   const path = pts.map((p, i) => `${i ? 'L' : 'M'}${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(' ');
   const last = pts[pts.length - 1];
   const area = `${path} L${last[0].toFixed(1)} ${h - pad} L${pts[0][0].toFixed(1)} ${h - pad} Z`;
-  return `<svg width="${w}" height="${h}">
-    <path d="${area}" fill="${color}" opacity="0.25"/>
-    <path d="${path}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round"/>
-    <circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="2.2" fill="${color}"/>
-  </svg>`;
+  return svgEl('svg', { width: w, height: h }, [
+    svgEl('path', { d: area, fill: color, opacity: 0.25 }),
+    svgEl('path', { d: path, fill: 'none', stroke: color, 'stroke-width': 1.5, 'stroke-linecap': 'round' }),
+    svgEl('circle', { cx: last[0].toFixed(1), cy: last[1].toFixed(1), r: 2.2, fill: color })
+  ]);
 }
 
 function render(data) {
@@ -50,7 +63,9 @@ function render(data) {
   document.getElementById('allTimeHighDate').textContent = athDate || '—';
 
   const color = TH_BADGE_COLORS[tone] || '#ffd700';
-  document.getElementById('sparkline').innerHTML = sparklineSVG(trend || [], color);
+  const sparkEl = document.getElementById('sparkline');
+  sparkEl.textContent = '';
+  sparkEl.appendChild(sparklineSVG(trend || [], color));
 }
 
 function refresh() {
@@ -86,6 +101,31 @@ const COUNT_BUTTONS = [
     count: r => r.windows,
     label: n => (n ? `Merge ${n} ${n === 1 ? 'Window' : 'Windows'}` : 'One Window'),
     title: r => `${r.tabs} tabs from ${r.windows} other windows`
+  },
+  {
+    id: 'btnGroup',
+    fallback: 'Group Tabs',
+    query: () => ({ type: 'GROUP_TABS', dryRun: true }),
+    count: r => r.count,
+    label: n => (n ? `Group ${n} ${n === 1 ? 'Tab' : 'Tabs'}` : 'Nothing to Group')
+  },
+  {
+    id: 'btnUngroup',
+    fallback: 'Ungroup Tabs',
+    query: () => ({ type: 'UNGROUP_TABS', dryRun: true }),
+    count: r => r.count,
+    label: n => (n ? `Ungroup ${n} ${n === 1 ? 'Tab' : 'Tabs'}` : 'No Groups')
+  },
+  {
+    id: 'btnIdleCleanup',
+    fallback: 'Idle Cleanup',
+    query: () => {
+      const ms = thParseDuration(document.getElementById('idleThreshold').value);
+      return ms ? { type: 'IDLE_CLEANUP_NOW', maxAge: ms, dryRun: true } : null;
+    },
+    count: r => (r.closed || 0) + (r.discarded || 0),
+    label: n => (n ? `Clean ${n} Idle` : 'No Idle Tabs'),
+    invalidLabel: 'Invalid Time'
   }
 ];
 
@@ -94,8 +134,14 @@ function updateCounts() {
   const seq = ++countSeq;
   return Promise.all(COUNT_BUTTONS.map(async b => {
     const btn = document.getElementById(b.id);
+    const query = b.query();
+    if (!query) {
+      btn.textContent = b.invalidLabel || b.fallback;
+      btn.disabled = true;
+      return;
+    }
     let r = null;
-    try { r = await api.runtime.sendMessage(b.query()); } catch (_) {}
+    try { r = await api.runtime.sendMessage(query); } catch (_) {}
     if (seq !== countSeq) return;
     if (!r) {
       btn.textContent = b.fallback;
@@ -130,6 +176,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (settings && settings.popupAgeThreshold) {
     document.getElementById('ageThreshold').value = String(settings.popupAgeThreshold);
   }
+  if (settings && settings.popupIdleThreshold) {
+    document.getElementById('idleThreshold').value = settings.popupIdleThreshold;
+  }
+
+  if (api.tabGroups) document.getElementById('groupRow').hidden = false;
 
   refresh();
   updateCounts();
@@ -152,6 +203,16 @@ document.addEventListener('DOMContentLoaded', async () => {
       r => (r && r.merged) ? `Merged ${r.merged}` : 'None Found');
   });
 
+  document.getElementById('btnGroup').addEventListener('click', e => {
+    runAction(e.currentTarget, { type: 'GROUP_TABS' }, 'Grouping…',
+      r => (r && r.grouped) ? `Grouped ${r.grouped}` : 'Nothing to Group');
+  });
+
+  document.getElementById('btnUngroup').addEventListener('click', e => {
+    runAction(e.currentTarget, { type: 'UNGROUP_TABS' }, 'Ungrouping…',
+      r => (r && r.ungrouped) ? `Ungrouped ${r.ungrouped}` : 'No Groups');
+  });
+
   document.getElementById('ageThreshold').addEventListener('change', async (e) => {
     const ms = parseInt(e.target.value, 10);
     const { settings } = await api.storage.local.get('settings');
@@ -164,6 +225,26 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('closeOldTabs').addEventListener('click', e => {
     const maxAge = parseInt(document.getElementById('ageThreshold').value, 10);
     runAction(e.currentTarget, { type: 'CLOSE_OLD_TABS', maxAge }, 'Closing…',
+      r => {
+        if (!r) return 'None Found';
+        const closed = r.closed || 0, discarded = r.discarded || 0;
+        if (!closed && !discarded) return 'None Found';
+        return discarded ? `Closed ${closed}, unloaded ${discarded}` : `Closed ${closed}`;
+      });
+  });
+
+  document.getElementById('idleThreshold').addEventListener('change', async e => {
+    const { settings } = await api.storage.local.get('settings');
+    const next = Object.assign({}, settings || {});
+    next.popupIdleThreshold = e.target.value;
+    await api.storage.local.set({ settings: next });
+    updateCounts();
+  });
+
+  document.getElementById('btnIdleCleanup').addEventListener('click', e => {
+    const ms = thParseDuration(document.getElementById('idleThreshold').value);
+    if (!ms) return;
+    runAction(e.currentTarget, { type: 'IDLE_CLEANUP_NOW', maxAge: ms }, 'Cleaning…',
       r => {
         if (!r) return 'None Found';
         const closed = r.closed || 0, discarded = r.discarded || 0;

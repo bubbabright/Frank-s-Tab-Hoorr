@@ -3,6 +3,41 @@
 
 const api = globalThis.browser || globalThis.chrome;
 
+// Small DOM builders so rendering never touches innerHTML with interpolated values.
+function h(tag, attrs, children) {
+  const node = document.createElement(tag);
+  if (attrs) for (const [k, v] of Object.entries(attrs)) {
+    if (k === 'class') node.className = v;
+    else if (k === 'style') node.style.cssText = v;
+    else node.setAttribute(k, v);
+  }
+  (children || []).forEach(c => {
+    if (c == null) return;
+    node.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+  });
+  return node;
+}
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+function svgEl(tag, attrs, children) {
+  const node = document.createElementNS(SVG_NS, tag);
+  if (attrs) for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+  (children || []).forEach(c => {
+    if (c == null) return;
+    node.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+  });
+  return node;
+}
+
+function replaceContent(container, node) {
+  container.textContent = '';
+  container.appendChild(node);
+}
+
+function emptyState(container, text) {
+  replaceContent(container, h('p', { class: 'chart-empty' }, [text]));
+}
+
 let RANGE = '7d';
 let ALL = [];
 let ALL_ACTIONS = [];
@@ -62,7 +97,7 @@ function stats(samples) {
   };
 }
 
-function formatXLabel(ts, range) {
+function formatXLabel(ts, range, includeTime) {
   const d = new Date(ts);
   if (range === '24h') {
     return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
@@ -70,22 +105,34 @@ function formatXLabel(ts, range) {
   if (range === '7d') {
     return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
   }
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const date = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  // A wide range (e.g. 90d/all) whose actual samples only span a day or two would
+  // otherwise repeat the same bare date across every tick — add the time so ticks differ.
+  if (!includeTime) return date;
+  return `${date}, ${d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
+}
+
+function statBlock(k, v, s) {
+  return h('div', { class: 'stat' }, [
+    h('div', { class: 'stat-k' }, [k]),
+    h('div', { class: 'stat-v' }, [String(v)]),
+    h('div', { class: 'stat-s' }, [s])
+  ]);
 }
 
 function renderStats(s) {
-  document.getElementById('stats').innerHTML = `
-    <div class="stat"><div class="stat-k">Now</div><div class="stat-v">${NOW_T}</div><div class="stat-s">${NOW_W} windows</div></div>
-    <div class="stat"><div class="stat-k">Avg (${RANGE})</div><div class="stat-v">${s.avg}</div><div class="stat-s">${s.n} samples</div></div>
-    <div class="stat"><div class="stat-k">Peak (${RANGE})</div><div class="stat-v">${s.peak}</div><div class="stat-s">min ${s.min}</div></div>
-    <div class="stat"><div class="stat-k">All-time high</div><div class="stat-v">${ATH || '—'}</div><div class="stat-s">${ATH_DATE || ''}</div></div>
-  `;
+  const container = document.getElementById('stats');
+  container.textContent = '';
+  container.appendChild(statBlock('Now', NOW_T, `${NOW_W} windows`));
+  container.appendChild(statBlock(`Avg (${RANGE})`, s.avg, `${s.n} samples`));
+  container.appendChild(statBlock(`Peak (${RANGE})`, s.peak, `min ${s.min}`));
+  container.appendChild(statBlock('All-time high', ATH || '—', ATH_DATE || ''));
 }
 
 function renderChart(samples) {
   const el = document.getElementById('chart');
   if (samples.length < 2) {
-    el.innerHTML = '<p class="chart-empty">Not enough samples yet. Keep the browser open and tabs will be recorded.</p>';
+    emptyState(el, 'Not enough samples yet. Keep the browser open and tabs will be recorded.');
     return;
   }
 
@@ -130,35 +177,38 @@ function renderChart(samples) {
 
   // Y-axis ticks (3)
   const yTicks = [max, Math.round((max + min) / 2), min];
-  let yTickSvg = '';
+  const yTickNodes = [];
   yTicks.forEach(v => {
     const y = yAt(v);
-    yTickSvg += `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${w - padR}" y2="${y.toFixed(1)}" stroke="#2a2a2a"/>`;
-    yTickSvg += `<text x="${padL - 6}" y="${(y + 4).toFixed(1)}" fill="#888" font-size="12" text-anchor="end">${v}</text>`;
+    yTickNodes.push(svgEl('line', { x1: padL, y1: y.toFixed(1), x2: w - padR, y2: y.toFixed(1), stroke: '#2a2a2a' }));
+    yTickNodes.push(svgEl('text', { x: padL - 6, y: (y + 4).toFixed(1), fill: '#888', 'font-size': 12, 'text-anchor': 'end' }, [String(v)]));
   });
 
   // X-axis labels — evenly spaced along time
   const tickCount = RANGE === '24h' ? 6 : (RANGE === '7d' ? 7 : 6);
   const nTicks = Math.min(tickCount, pts.length);
-  let xTickSvg = '';
+  const spanMs = samples[samples.length - 1].ts - samples[0].ts;
+  const includeTime = RANGE !== '24h' && RANGE !== '7d' && spanMs < 3 * 86400000;
+  const xTickNodes = [];
   for (let i = 0; i < nTicks; i++) {
     const idx = nTicks === 1 ? 0 : Math.round(i * (pts.length - 1) / (nTicks - 1));
     const p = pts[idx];
     const x = xAt(idx);
-    const label = formatXLabel(p.ts, RANGE);
+    const label = formatXLabel(p.ts, RANGE, includeTime);
     const anchor = i === 0 ? 'start' : (i === nTicks - 1 ? 'end' : 'middle');
-    xTickSvg += `<line x1="${x.toFixed(1)}" y1="${padT + plotH}" x2="${x.toFixed(1)}" y2="${padT + plotH + 5}" stroke="#555"/>`;
-    xTickSvg += `<text x="${x.toFixed(1)}" y="${h - 12}" fill="#aaa" font-size="12" text-anchor="${anchor}">${label}</text>`;
+    xTickNodes.push(svgEl('line', { x1: x.toFixed(1), y1: padT + plotH, x2: x.toFixed(1), y2: padT + plotH + 5, stroke: '#555' }));
+    xTickNodes.push(svgEl('text', { x: x.toFixed(1), y: h - 12, fill: '#aaa', 'font-size': 12, 'text-anchor': anchor }, [label]));
   }
 
-  el.innerHTML = `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" class="chart-svg">
-    ${yTickSvg}
-    <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT + plotH}" stroke="#444"/>
-    <line x1="${padL}" y1="${padT + plotH}" x2="${w - padR}" y2="${padT + plotH}" stroke="#444"/>
-    <path d="${path}" fill="none" stroke="#ffd700" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-    <circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="3.5" fill="#ffd700"/>
-    ${xTickSvg}
-  </svg>`;
+  const svgRoot = svgEl('svg', { viewBox: `0 0 ${w} ${h}`, width: '100%', height: h, class: 'chart-svg' }, [
+    ...yTickNodes,
+    svgEl('line', { x1: padL, y1: padT, x2: padL, y2: padT + plotH, stroke: '#444' }),
+    svgEl('line', { x1: padL, y1: padT + plotH, x2: w - padR, y2: padT + plotH, stroke: '#444' }),
+    svgEl('path', { d: path, fill: 'none', stroke: '#ffd700', 'stroke-width': 2, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }),
+    svgEl('circle', { cx: lx.toFixed(1), cy: ly.toFixed(1), r: 3.5, fill: '#ffd700' }),
+    ...xTickNodes
+  ]);
+  replaceContent(el, svgRoot);
 }
 
 /**
@@ -215,28 +265,32 @@ function renderDays() {
       });
   }
 
+  // Never show a placeholder bar for a day with no recorded history.
+  days = days.filter(d => d.max != null);
+
   if (titleEl) {
     titleEl.textContent = `Day breakdown · max tabs · ${rangeLabel(RANGE)}`;
   }
 
+  const dayList = document.getElementById('dayList');
   if (!days.length) {
-    document.getElementById('dayList').innerHTML =
-      '<p class="chart-empty">No day data yet.</p>';
+    emptyState(dayList, 'No day data yet.');
     return;
   }
 
-  const maxBar = Math.max(1, ...days.map(d => d.max || 0));
-  let html = '<div class="day-head"><span>Day</span><span>Max tabs</span></div>';
+  const maxBar = Math.max(1, ...days.map(d => d.max));
+  const frag = document.createDocumentFragment();
+  frag.appendChild(h('div', { class: 'day-head' }, [h('span', null, ['Day']), h('span', null, ['Max tabs'])]));
   days.forEach(row => {
-    const v = row.max;
-    const pct = v == null ? 0 : (v / maxBar) * 100;
-    html += `<div class="day-row">
-      <div class="day-label">${row.label}</div>
-      <div class="day-bar-bg"><div class="day-bar" style="width:${pct}%"></div></div>
-      <div class="day-val">${v == null ? '—' : v}</div>
-    </div>`;
+    const pct = (row.max / maxBar) * 100;
+    frag.appendChild(h('div', { class: 'day-row' }, [
+      h('div', { class: 'day-label' }, [row.label]),
+      h('div', { class: 'day-bar-bg' }, [h('div', { class: 'day-bar', style: `width:${pct}%` }, [])]),
+      h('div', { class: 'day-val' }, [String(row.max)])
+    ]));
   });
-  document.getElementById('dayList').innerHTML = html;
+  dayList.textContent = '';
+  dayList.appendChild(frag);
 }
 
 function actionTime(ts) {
@@ -261,11 +315,14 @@ function renderActions() {
 
   const list = document.getElementById('actionList');
   if (!rows.length) {
-    list.innerHTML = '<p class="chart-empty">No actions recorded yet. Close Dupes, Close Old Tabs, Merge Windows and idle cleanup are logged here.</p>';
+    emptyState(list, 'No actions recorded yet. Close Dupes, Close Old Tabs, Merge Windows and idle cleanup are logged here.');
     return;
   }
 
-  let html = '<div class="act-head"><span>When</span><span>Action</span><span>Result</span></div>';
+  const frag = document.createDocumentFragment();
+  frag.appendChild(h('div', { class: 'act-head' }, [
+    h('span', null, ['When']), h('span', null, ['Action']), h('span', null, ['Result'])
+  ]));
   rows.forEach(a => {
     const k = TH_ACTION_KINDS[a.kind] || { label: a.kind, auto: false };
     let result;
@@ -277,13 +334,14 @@ function renderActions() {
       if (a.discarded) parts.push(`unloaded ${a.discarded}`);
       result = parts.join(', ') || '—';
     }
-    html += `<div class="act-row">
-      <div class="act-when">${actionTime(a.ts)}</div>
-      <div class="act-kind"><span class="act-tag ${k.auto ? 'auto' : 'manual'}">${k.label}</span></div>
-      <div class="act-result">${result}</div>
-    </div>`;
+    frag.appendChild(h('div', { class: 'act-row' }, [
+      h('div', { class: 'act-when' }, [actionTime(a.ts)]),
+      h('div', { class: 'act-kind' }, [h('span', { class: `act-tag ${k.auto ? 'auto' : 'manual'}` }, [k.label])]),
+      h('div', { class: 'act-result' }, [result])
+    ]));
   });
-  list.innerHTML = html;
+  list.textContent = '';
+  list.appendChild(frag);
 }
 
 function render() {
@@ -300,14 +358,14 @@ function render() {
 
 async function boot() {
   const [data, tabs, wins] = await Promise.all([
-    api.storage.local.get(['samples', 'ath', 'athDate', 'actions']),
+    api.runtime.sendMessage({ type: 'GET_HISTORY' }),
     api.tabs.query({}),
     api.windows.getAll({ windowTypes: ['normal'] })
   ]);
-  ALL = data.samples || [];
-  ALL_ACTIONS = data.actions || [];
-  ATH = data.ath || 0;
-  ATH_DATE = data.athDate || '';
+  ALL = (data && data.samples) || [];
+  ALL_ACTIONS = (data && data.actions) || [];
+  ATH = (data && data.ath) || 0;
+  ATH_DATE = (data && data.athDate) || '';
   NOW_T = tabs.length;
   NOW_W = wins.length;
   render();
@@ -336,13 +394,13 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   document.getElementById('btnClear').addEventListener('click', async () => {
     if (!confirm('Clear all history samples?')) return;
-    await api.storage.local.set({ samples: [] });
+    await api.runtime.sendMessage({ type: 'CLEAR_SAMPLES' });
     ALL = [];
     render();
   });
   document.getElementById('btnClearActions').addEventListener('click', async () => {
     if (!confirm('Clear the action log?')) return;
-    await api.storage.local.set({ actions: [] });
+    await api.runtime.sendMessage({ type: 'CLEAR_ACTIONS' });
     ALL_ACTIONS = [];
     renderActions();
   });

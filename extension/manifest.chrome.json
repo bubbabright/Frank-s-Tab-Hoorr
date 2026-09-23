@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Tab Hoor",
-  "version": "0.6.0",
+  "version": "0.9.3",
   "description": "Count, dedupe, merge and auto-group your tabs. All local.",
   "icons": {
     "16": "icons/icon-16.png",
@@ -32,5 +32,8 @@
     "storage",
     "alarms"
   ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvDq08KbM6FES5QwNbu4vX4OEQYG2jihJsq9iUu+4xXPxtCzBgQC2XjLUzpiPQ4NP09LvPcPXIGcp01B/QU5DB8dxt7VPDVTTC9BzUdC21tD8dMVF3J2SKq3NrwXtk/BOn2wUTLWXGSX9diGZFlc0CcpcxhoKjJ7aWXhakT7zrAPuGcOyIQliKB1chzvkC8NInLwBBIef3ZPRQN6Y9cDGI2FjpDxafhCI51UB73wlewXF+YDuMSwlHXQ8VdHJ6M1acqaOghlz06h7C3pbdJXuBsrxmJM3qATvCioh4PfShQCJPxudtac3Hpvrb9kYKie8fJLq9k/s4Ft6zop82kqDgwIDAQAB"
 }

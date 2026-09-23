@@ -1,10 +1,10 @@
 // Tab Hoor — MV3 background (Chrome service worker / Firefox event page)
 'use strict';
 
-// Chrome service worker loads this file alone — pull in shared data.
-// Firefox lists data.js before this file in background.scripts.
+// Chrome service worker loads this file alone — pull in shared data + the
+// sqlite history store. Firefox lists them before this file in background.scripts.
 if (typeof importScripts === 'function' && typeof TH_DEFAULT_SETTINGS === 'undefined') {
-  importScripts('data.js');
+  importScripts('data.js', 'lib/sql-wasm.js', 'db.js');
 }
 
 const api = globalThis.browser || globalThis.chrome;
@@ -38,14 +38,24 @@ function getSettings() {
 
 /** Append one entry to the action log, pruned by the current retention setting. */
 async function logAction(entry) {
-  const data = await getAll();
-  const settings = Object.assign({}, TH_DEFAULT_SETTINGS, data.settings || {});
-  const actions = thPushAction(
-    data.actions,
-    Object.assign({ ts: Date.now() }, entry),
-    thRetentionMs(settings.retention)
-  );
-  await setPartial({ actions });
+  const settings = await getSettings();
+  const full = Object.assign({ ts: Date.now() }, entry);
+  const maxAge = thRetentionMs(settings.retention);
+  if (settings.historyBackend === 'legacy') {
+    const data = await getAll();
+    let actions = (data.actions || []).slice();
+    actions.push(full);
+    if (maxAge !== Infinity) {
+      const cutoff = Date.now() - maxAge;
+      actions = actions.filter(a => a.ts >= cutoff);
+    }
+    if (actions.length > 500) actions = actions.slice(-500);
+    await setPartial({ actions });
+    return;
+  }
+  await thDbInsertAction(full);
+  // No row cap when retention is 'all' — that's the whole point of the sqlite backend.
+  await thDbPruneActions(maxAge !== Infinity ? Date.now() - maxAge : null, maxAge !== Infinity ? 500 : null);
 }
 
 // ── toolbar icon ─────────────────────────────────────────────────────────────
@@ -154,15 +164,31 @@ async function doRefreshCounts() {
   await onCountUpdate();
 }
 
-async function onCountUpdate() {
-  const data = await getAll();
-  const settings = Object.assign({}, TH_DEFAULT_SETTINGS, data.settings || {});
-  let ath = data.ath || 0;
-  let athDate = data.athDate || '';
-  if (tabCount > ath) {
-    ath = tabCount;
-    athDate = thFormatDate(Date.now());
+async function getAthState(settings) {
+  if (settings.historyBackend === 'legacy') {
+    const data = await getAll();
+    return { ath: data.ath || 0, athDate: data.athDate || '' };
+  }
+  return {
+    ath: parseInt(await thDbGetMeta('ath'), 10) || 0,
+    athDate: (await thDbGetMeta('athDate')) || ''
+  };
+}
+
+async function setAthState(settings, ath, athDate) {
+  if (settings.historyBackend === 'legacy') {
     await setPartial({ ath, athDate });
+  } else {
+    await thDbSetMeta('ath', ath);
+    await thDbSetMeta('athDate', athDate);
+  }
+}
+
+async function onCountUpdate() {
+  const settings = await getSettings();
+  const { ath } = await getAthState(settings);
+  if (tabCount > ath) {
+    await setAthState(settings, tabCount, thFormatDate(Date.now()));
   }
   await updateBadge(tabCount, settings);
   if (settings.sampling === 'evt') await recordSample();
@@ -171,18 +197,24 @@ async function onCountUpdate() {
 // ── history samples ──────────────────────────────────────────────────────────
 
 async function recordSample() {
-  const data = await getAll();
-  const settings = Object.assign({}, TH_DEFAULT_SETTINGS, data.settings || {});
-  let samples = data.samples || [];
-  samples.push({ ts: Date.now(), t: tabCount, w: windowCount });
+  const settings = await getSettings();
   const maxAge = thRetentionMs(settings.retention);
-  if (maxAge !== Infinity) {
-    const cutoff = Date.now() - maxAge;
-    samples = samples.filter(s => s.ts >= cutoff);
+  if (settings.historyBackend === 'legacy') {
+    const data = await getAll();
+    let samples = data.samples || [];
+    samples.push({ ts: Date.now(), t: tabCount, w: windowCount });
+    if (maxAge !== Infinity) {
+      const cutoff = Date.now() - maxAge;
+      samples = samples.filter(s => s.ts >= cutoff);
+    }
+    if (samples.length > 50000) samples = samples.slice(-50000);
+    await setPartial({ samples });
+    return;
   }
-  // Cap length as a safety net (~90d @ 1m ≈ 130k samples; keep ≤ 50k)
-  if (samples.length > 50000) samples = samples.slice(-50000);
-  await setPartial({ samples });
+  await thDbInsertSample(Date.now(), tabCount, windowCount);
+  // No row cap when retention is 'all' — that's the whole point of the sqlite backend
+  // (storage.local's array approach is what needed the ~50k/~90d safety net).
+  await thDbPruneSamples(maxAge !== Infinity ? Date.now() - maxAge : null, maxAge !== Infinity ? 50000 : null);
 }
 
 async function ensureSamplingAlarm(settings) {
@@ -230,36 +262,42 @@ async function findDupeIds() {
 
 // ── idle tab cleanup (ported from FFTabClose: close idle tabs, discard idle pinned tabs) ──────
 
-async function checkIdleTabs() {
-  const settings = await getSettings();
-  if (!settings.idleEnabled) return { closed: 0, discarded: 0 };
-
-  const thresholdMs = (settings.idleMinutes || 30) * 60000;
+// Tabs that a threshold would catch: idle normal tabs (close) and idle pinned
+// tabs (discard/unload). Active and audio-playing tabs are always safe.
+async function idleCandidates(thresholdMs) {
   const now = Date.now();
   const tabs = await api.tabs.query({});
   const closeIds = [];
   const discardIds = [];
-
   for (const tab of tabs) {
     if (tab.active || tab.audible) continue;
     if (tab.discarded) continue;
     const lastAccessed = tab.lastAccessed || 0;
     if (now - lastAccessed < thresholdMs) continue;
-    if (tab.pinned) {
-      discardIds.push(tab.id);
-    } else {
-      closeIds.push(tab.id);
-    }
+    if (tab.pinned) discardIds.push(tab.id);
+    else closeIds.push(tab.id);
   }
+  return { closeIds, discardIds };
+}
 
+// Shared by the automatic idle-cleanup alarm and the popup's manual button —
+// same sweep, different threshold source and action-log kind.
+async function sweepIdleTabs(thresholdMs, kind) {
+  const { closeIds, discardIds } = await idleCandidates(thresholdMs);
   if (closeIds.length) await api.tabs.remove(closeIds);
   for (const id of discardIds) {
     try { await api.tabs.discard(id); } catch (err) { console.error('Tab Hoor discard', err); }
   }
   if (closeIds.length || discardIds.length) {
-    await logAction({ kind: 'idle', closed: closeIds.length, discarded: discardIds.length });
+    await logAction({ kind, closed: closeIds.length, discarded: discardIds.length });
   }
   return { closed: closeIds.length, discarded: discardIds.length };
+}
+
+async function checkIdleTabs() {
+  const settings = await getSettings();
+  if (!settings.idleEnabled) return { closed: 0, discarded: 0 };
+  return sweepIdleTabs((settings.idleMinutes || 30) * 60000, 'idle');
 }
 
 async function ensureIdleAlarm(settings) {
@@ -272,41 +310,41 @@ async function ensureIdleAlarm(settings) {
 
 // ── auto tab grouping (ported from firefox-auto-tab-grouping, Firefox-only tabGroups API) ─────
 
+// tabGroups.TAB_GROUP_ID_NONE is -1; a real group id can be 0, which `groupId && ...`
+// would wrongly treat as falsy/ungrouped, so check the type instead of truthiness.
+function thIsGrouped(t) {
+  return typeof t.groupId === 'number' && t.groupId !== -1;
+}
+
 async function groupTabIfMatch(tab) {
   if (!api.tabGroups || !tab || !tab.url) return;
   const settings = await getSettings();
   if (!settings.groupingEnabled) return;
   // Pinned tabs can't be grouped; tab already in a group? Leave it alone rather than re-shuffling.
-  if (tab.pinned || (tab.groupId && tab.groupId !== -1)) return;
+  if (tab.pinned || thIsGrouped(tab)) return;
 
-  let hostname;
-  try { hostname = new URL(tab.url).hostname.toLowerCase(); } catch (_) { return; }
-  const rule = thParseGroupingRules(settings.groupingRules).find(r => hostname.includes(r.pattern));
-
-  // Explicit rules win; otherwise auto mode names the group after the domain,
-  // but only once 2+ tabs share it so lone tabs don't each get their own group.
-  let name = rule && rule.name;
-  let auto = false;
-  if (!name && settings.groupingAuto) {
-    name = thDomainOf(tab.url);
-    auto = true;
-  }
+  // Auto tab grouping is domain-only — named after the tab's registrable domain,
+  // and only once groupingAutoMinTabs tabs share it (default 2, so lone tabs
+  // don't each get their own group unless the user lowers the threshold to 1).
+  const name = thDomainOf(tab.url);
   if (!name) return;
 
   try {
-    const groups = await api.tabGroups.query({ windowId: tab.windowId, title: name });
-    if (groups && groups.length) {
+    // Don't trust the API's own title filter — some tabGroups implementations
+    // ignore it and return every group in the window, which would dump this
+    // tab into an unrelated existing group. Filter client-side to be sure.
+    const groups = (await api.tabGroups.query({ windowId: tab.windowId }) || [])
+      .filter(g => g.title === name);
+    if (groups.length) {
       await api.tabs.group({ tabIds: [tab.id], groupId: groups[0].id });
       return;
     }
-    let tabIds = [tab.id];
-    if (auto) {
-      const all = await api.tabs.query({ windowId: tab.windowId });
-      const siblings = all.filter(t =>
-        t.id !== tab.id && !t.pinned && (!t.groupId || t.groupId === -1) && thDomainOf(t.url) === name);
-      if (!siblings.length) return;
-      tabIds = tabIds.concat(siblings.map(t => t.id));
-    }
+    const all = await api.tabs.query({ windowId: tab.windowId });
+    const siblings = all.filter(t =>
+      t.id !== tab.id && !t.pinned && !thIsGrouped(t) && thDomainOf(t.url) === name);
+    const minTabs = settings.groupingAutoMinTabs || 2;
+    if (1 + siblings.length < minTabs) return;
+    const tabIds = [tab.id].concat(siblings.map(t => t.id));
     const groupId = await api.tabs.group({ tabIds });
     await api.tabGroups.update(groupId, { title: name });
   } catch (err) {
@@ -327,6 +365,78 @@ async function groupExistingTabs() {
   if (!api.tabGroups) return;
   const tabs = await api.tabs.query({});
   for (const tab of tabs) await queueGroup(tab);
+}
+
+// Tabs in a window eligible for manual grouping: not pinned, not already grouped, resolvable domain.
+async function ungroupedEligibleTabs(windowId) {
+  const tabs = await api.tabs.query({ windowId });
+  return tabs
+    .filter(t => !t.pinned && !thIsGrouped(t))
+    .map(t => ({ tab: t, name: t.url ? thDomainOf(t.url) : null }))
+    .filter(x => x.name);
+}
+
+// Buckets eligible tabs by domain, dropping buckets that don't meet groupingAutoMinTabs.
+async function groupableBuckets(windowId) {
+  const settings = await getSettings();
+  const minTabs = settings.groupingAutoMinTabs || 2;
+  const eligible = await ungroupedEligibleTabs(windowId);
+  const buckets = new Map();
+  for (const { tab, name } of eligible) {
+    if (!buckets.has(name)) buckets.set(name, { tabIds: [] });
+    buckets.get(name).tabIds.push(tab.id);
+  }
+  for (const [name, b] of buckets) {
+    if (b.tabIds.length < minTabs) buckets.delete(name);
+  }
+  return buckets;
+}
+
+// Manual "Group" action: buckets every ungrouped tab in the window by domain,
+// respecting groupingAutoMinTabs.
+async function groupWindowNow(windowId) {
+  if (!api.tabGroups) return 0;
+  const buckets = await groupableBuckets(windowId);
+  let grouped = 0;
+  for (const [name, { tabIds }] of buckets) {
+    // Same client-side title filter as groupTabIfMatch — see comment there.
+    const groups = (await api.tabGroups.query({ windowId }) || []).filter(g => g.title === name);
+    if (groups.length) {
+      await api.tabs.group({ tabIds, groupId: groups[0].id });
+    } else {
+      const groupId = await api.tabs.group({ tabIds });
+      await api.tabGroups.update(groupId, { title: name });
+    }
+    grouped += tabIds.length;
+  }
+  return grouped;
+}
+
+// Manual "Ungroup" action: dissolves every tab group in the window.
+async function ungroupWindowNow(windowId) {
+  if (!api.tabGroups) return 0;
+  const tabs = await api.tabs.query({ windowId });
+  const groupedIds = tabs.filter(thIsGrouped).map(t => t.id);
+  if (!groupedIds.length) return 0;
+  try {
+    await api.tabs.ungroup(groupedIds);
+    return groupedIds.length;
+  } catch (err) {
+    // Some tabGroups implementations don't accept a bulk array — retry one at a time
+    // so a single bad id doesn't sink the whole action.
+    console.error('Tab Hoor ungroup (bulk) — retrying individually', err);
+    let ok = 0;
+    for (const id of groupedIds) {
+      try { await api.tabs.ungroup(id); ok++; }
+      catch (e) { console.error('Tab Hoor ungroup', id, e); }
+    }
+    return ok;
+  }
+}
+
+async function focusedWindowId() {
+  const win = await api.windows.getLastFocused({ windowTypes: ['normal'] });
+  return win && win.id;
 }
 
 // ── merge windows ────────────────────────────────────────────────────────────
@@ -378,24 +488,62 @@ api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg && msg.type === 'GET_STATE') {
     // Always re-query — cached tabCount is 0 after every SW/event-page restart.
     queryTabs()
-      .then(() => getAll())
-      .then(data => {
-        const settings = Object.assign({}, TH_DEFAULT_SETTINGS, data.settings || {});
+      .then(() => getSettings())
+      .then(async settings => {
         // Keep badge in sync while we're here (options/popup open often wake the worker).
         updateBadge(tabCount, settings);
+        const { ath, athDate } = await getAthState(settings);
+        const cutoff = Date.now() - 14 * 86400000;
+        const samples = settings.historyBackend === 'legacy'
+          ? (await getAll()).samples || []
+          : await thDbGetSamples(cutoff);
+        const trendSamples = settings.historyBackend === 'legacy'
+          ? samples.filter(s => s.ts >= cutoff)
+          : samples;
         sendResponse({
           tabCount,
           windowCount,
           tone: thTone(tabCount),
-          ath: data.ath || 0,
-          athDate: data.athDate || '',
-          trend: thTrend14(data.samples)
+          ath,
+          athDate,
+          trend: thTrend14(trendSamples)
         });
       })
       .catch(err => {
         console.error('Tab Hoor GET_STATE', err);
         sendResponse(null);
       });
+    return true;
+  }
+  if (msg && msg.type === 'GET_HISTORY') {
+    getSettings().then(async settings => {
+      if (settings.historyBackend === 'legacy') {
+        const data = await getAll();
+        return sendResponse({
+          samples: data.samples || [], actions: data.actions || [],
+          ath: data.ath || 0, athDate: data.athDate || ''
+        });
+      }
+      const [samples, actions, ath, athDate] = await Promise.all([
+        thDbGetSamples(null), thDbGetActions(null), thDbGetMeta('ath'), thDbGetMeta('athDate')
+      ]);
+      sendResponse({ samples, actions, ath: parseInt(ath, 10) || 0, athDate: athDate || '' });
+    }).catch(err => {
+      console.error('Tab Hoor GET_HISTORY', err);
+      sendResponse(null);
+    });
+    return true;
+  }
+  if (msg && msg.type === 'CLEAR_SAMPLES') {
+    getSettings()
+      .then(s => s.historyBackend === 'legacy' ? setPartial({ samples: [] }) : thDbClearSamples())
+      .then(() => sendResponse({ ok: true })).catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+  if (msg && msg.type === 'CLEAR_ACTIONS') {
+    getSettings()
+      .then(s => s.historyBackend === 'legacy' ? setPartial({ actions: [] }) : thDbClearActions())
+      .then(() => sendResponse({ ok: true })).catch(() => sendResponse({ ok: false }));
     return true;
   }
   if (msg && msg.type === 'RECORD_SAMPLE') {
@@ -447,6 +595,54 @@ api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     }).catch(err => {
       console.error('Tab Hoor CLOSE_OLD_TABS', err);
       sendResponse(msg.dryRun ? { closed: 0, discarded: 0 } : { closed: 0, discarded: 0 });
+    });
+    return true;
+  }
+  if (msg && msg.type === 'IDLE_CLEANUP_NOW') {
+    if (msg.dryRun) {
+      idleCandidates(msg.maxAge)
+        .then(({ closeIds, discardIds }) => sendResponse({ closed: closeIds.length, discarded: discardIds.length }))
+        .catch(() => sendResponse({ closed: 0, discarded: 0 }));
+      return true;
+    }
+    sweepIdleTabs(msg.maxAge, 'idleManual')
+      .then(result => sendResponse(result))
+      .catch(err => {
+        console.error('Tab Hoor IDLE_CLEANUP_NOW', err);
+        sendResponse({ closed: 0, discarded: 0 });
+      });
+    return true;
+  }
+  if (msg && msg.type === 'GROUP_TABS') {
+    focusedWindowId().then(async windowId => {
+      if (!windowId) return sendResponse(msg.dryRun ? { count: 0 } : { grouped: 0 });
+      if (msg.dryRun) {
+        const buckets = await groupableBuckets(windowId);
+        let count = 0;
+        for (const { tabIds } of buckets.values()) count += tabIds.length;
+        return sendResponse({ count });
+      }
+      const grouped = await groupWindowNow(windowId);
+      sendResponse({ grouped });
+    }).catch(err => {
+      console.error('Tab Hoor GROUP_TABS', err);
+      sendResponse(msg.dryRun ? { count: 0 } : { grouped: 0 });
+    });
+    return true;
+  }
+  if (msg && msg.type === 'UNGROUP_TABS') {
+    focusedWindowId().then(async windowId => {
+      if (!windowId) return sendResponse(msg.dryRun ? { count: 0 } : { ungrouped: 0 });
+      if (msg.dryRun) {
+        const tabs = await api.tabs.query({ windowId });
+        const count = tabs.filter(thIsGrouped).length;
+        return sendResponse({ count });
+      }
+      const ungrouped = await ungroupWindowNow(windowId);
+      sendResponse({ ungrouped });
+    }).catch(err => {
+      console.error('Tab Hoor UNGROUP_TABS', err);
+      sendResponse(msg.dryRun ? { count: 0 } : { ungrouped: 0 });
     });
     return true;
   }
@@ -507,12 +703,34 @@ api.storage.onChanged.addListener((changes, area) => {
     // Never badge from stale in-memory count (was painting "0" on settings save).
     refreshCounts();
     const old = changes.settings.oldValue || {};
-    if (s.groupingEnabled && (!old.groupingEnabled || old.groupingRules !== s.groupingRules ||
-        old.groupingAuto !== s.groupingAuto)) {
+    if (s.groupingEnabled && (!old.groupingEnabled || old.groupingAutoMinTabs !== s.groupingAutoMinTabs)) {
       groupExistingTabs().catch(err => console.error('Tab Hoor groupExistingTabs', err));
+    }
+    const oldBackend = old.historyBackend || TH_DEFAULT_SETTINGS.historyBackend;
+    if (s.historyBackend !== oldBackend) {
+      switchHistoryBackend(s.historyBackend).catch(err => console.error('Tab Hoor switchHistoryBackend', err));
     }
   }
 });
+
+// Best-effort sync so switching backends doesn't strand data on the side you're leaving.
+async function switchHistoryBackend(newBackend) {
+  if (newBackend === 'sqlite') {
+    const data = await getAll();
+    await thDbImportFromLocal(data.samples || [], data.actions || [], data.ath || 0, data.athDate || '');
+  } else {
+    const [samples, actions, ath, athDate] = await Promise.all([
+      thDbGetSamples(null), thDbGetActions(null), thDbGetMeta('ath'), thDbGetMeta('athDate')
+    ]);
+    // Legacy storage.local has no db behind it — cap to the same safety nets recordSample/logAction use.
+    await setPartial({
+      samples: samples.length > 50000 ? samples.slice(-50000) : samples,
+      actions: actions.length > 500 ? actions.slice(-500) : actions,
+      ath: parseInt(ath, 10) || 0,
+      athDate: athDate || ''
+    });
+  }
+}
 
 api.runtime.onInstalled.addListener(async () => {
   const data = await getAll();

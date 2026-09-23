@@ -12,18 +12,19 @@ const TH_DEFAULT_SETTINGS = {
   badgeMode: 'count',   // count | off
   sampling: '5m',       // 1m | 5m | 15m | evt
   retention: '90d',     // 14d | 30d | 90d | all
+  historyBackend: 'sqlite', // sqlite (years, wasm-backed) | legacy (storage.local arrays, capped ~6mo)
   idleEnabled: false,   // auto-close/discard idle tabs (ported from FFTabClose)
   idleMinutes: 30,
-  groupingEnabled: false, // auto tab grouping by hostname rule, Firefox only (ported from firefox-auto-tab-grouping)
-  groupingRules: '',      // newline-separated "pattern => Group Name"
-  groupingAuto: false,    // also group any 2+ tabs sharing a domain, named after the domain
+  groupingEnabled: false, // auto tab grouping by domain, Firefox only (ported from firefox-auto-tab-grouping)
+  groupingAutoMinTabs: 2, // minimum same-domain tabs before auto mode groups them
   dedupeIgnoreHash: true,   // treat http://x.com/ and http://x.com/#foo as the same tab
   dedupeIgnoreQuery: false, // treat http://x.com/?a=1 and http://x.com/?a=2 as the same tab
   dedupeIgnoreWww: false,   // treat http://www.x.com and http://x.com as the same tab
   dedupeCaseInsensitive: false,
   dedupeKeepPinned: true,   // prefer keeping a pinned tab over a non-pinned duplicate
   dedupeKeepActive: true,    // prefer keeping the active tab over a background duplicate
-  popupAgeThreshold: 86400000 // Default 24h for manual popup action
+  popupAgeThreshold: 86400000, // Default 24h for manual popup action
+  popupIdleThreshold: '30m'    // Default for the popup's manual idle-cleanup text box
 };
 
 // Colour tone for a tab count (drives badge, popup count and sparkline colour).
@@ -50,23 +51,6 @@ function thRetentionMs(key) {
 
 function thSamplingMinutes(key) {
   return { '1m': 1, '5m': 5, '15m': 15, 'evt': null }[key] ?? 5;
-}
-
-// "example.com => Group Name" per line, blank lines / lines without "=>" ignored.
-function thParseGroupingRules(text) {
-  return (text || '')
-    .split('\n')
-    .map(line => line.trim())
-    .filter(Boolean)
-    .map(line => {
-      const i = line.indexOf('=>');
-      if (i === -1) return null;
-      const pattern = line.slice(0, i).trim().toLowerCase();
-      const name = line.slice(i + 2).trim();
-      if (!pattern || !name) return null;
-      return { pattern, name };
-    })
-    .filter(Boolean);
 }
 
 // Last sample per day for the past 14 days, oldest first: [{t}] x14 (t = 0 when a day has no sample).
@@ -121,22 +105,30 @@ function thNormalizeUrl(url, settings) {
 // Action log: what Tab Hoor did on its own or on request, and how much it reduced.
 // kind is the stored key; auto marks actions the extension took without the user.
 const TH_ACTION_KINDS = {
-  idle:   { label: 'Idle cleanup',     auto: true },
-  dedupe: { label: 'Duplicates closed', auto: false },
-  old:    { label: 'Old tabs closed',   auto: false },
-  merge:  { label: 'Windows merged',    auto: false }
+  idle:       { label: 'Idle cleanup',        auto: true },
+  idleManual: { label: 'Idle cleanup',        auto: false },
+  dedupe:     { label: 'Duplicates closed',   auto: false },
+  old:        { label: 'Old tabs closed',     auto: false },
+  merge:      { label: 'Windows merged',      auto: false }
 };
 
-// Append an action entry, drop entries older than maxAgeMs, and cap the list.
-function thPushAction(actions, entry, maxAgeMs) {
-  let out = (actions || []).slice();
-  out.push(entry);
-  if (maxAgeMs !== Infinity) {
-    const cutoff = Date.now() - maxAgeMs;
-    out = out.filter(a => a.ts >= cutoff);
+// Parses "30m", "1h", "90m", "1d", "2h30m" etc into milliseconds. null if unparseable.
+const TH_DURATION_UNITS = { m: 60000, h: 3600000, d: 86400000 };
+function thParseDuration(text) {
+  const s = (text || '').trim().toLowerCase();
+  if (!s) return null;
+  const re = /(\d+(?:\.\d+)?)\s*(m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days)/g;
+  let ms = 0;
+  let matched = false;
+  let m;
+  while ((m = re.exec(s))) {
+    matched = true;
+    const n = parseFloat(m[1]);
+    const unit = m[2][0]; // first letter: m/h/d
+    ms += n * TH_DURATION_UNITS[unit];
   }
-  if (out.length > 500) out = out.slice(-500);
-  return out;
+  if (!matched) return null;
+  return ms > 0 ? ms : null;
 }
 
 // Total tabs removed by an action entry (merge moves tabs, so it counts 0).
@@ -149,15 +141,14 @@ function thActionTabs(entry) {
 if (typeof globalThis !== 'undefined') {
   globalThis.TH_BADGE_COLORS = TH_BADGE_COLORS;
   globalThis.TH_ACTION_KINDS = TH_ACTION_KINDS;
+  globalThis.thParseDuration = thParseDuration;
   globalThis.TH_DEFAULT_SETTINGS = TH_DEFAULT_SETTINGS;
   globalThis.thTone = thTone;
   globalThis.thFormatDate = thFormatDate;
   globalThis.thRetentionMs = thRetentionMs;
   globalThis.thSamplingMinutes = thSamplingMinutes;
-  globalThis.thParseGroupingRules = thParseGroupingRules;
   globalThis.thNormalizeUrl = thNormalizeUrl;
   globalThis.thDomainOf = thDomainOf;
   globalThis.thTrend14 = thTrend14;
-  globalThis.thPushAction = thPushAction;
   globalThis.thActionTabs = thActionTabs;
 }

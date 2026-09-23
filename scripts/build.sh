@@ -13,7 +13,7 @@ mkdir -p "$DIST/firefox" "$DIST/chrome"
 copy_shared() {
   local dest="$1"
   mkdir -p "$dest"/{popup,options,history,icons,lib}
-  cp "$SRC/data.js" "$SRC/background.js" "$dest/"
+  cp "$SRC/data.js" "$SRC/db.js" "$SRC/background.js" "$dest/"
   cp "$SRC/popup/"* "$dest/popup/"
   cp "$SRC/options/"* "$dest/options/"
   cp "$SRC/history/"* "$dest/history/"
