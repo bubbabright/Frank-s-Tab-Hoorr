@@ -24,6 +24,14 @@
           <span>Minimum tabs of one site before auto-grouping (1 groups every domain immediately)</span>
           <input type="number" id="groupingAutoMinTabs" data-setting="groupingAutoMinTabs" data-requires="groupingEnabled" min="1" max="20" step="1" />
         </label>
+        <label class="field" data-requires="groupingEnabled">
+          <span>Ungrouped tabs</span>
+          <select data-setting="groupingUngroupedPosition" data-requires="groupingEnabled">
+            <option value="leave">Leave in place</option>
+            <option value="start">Move to beginning</option>
+            <option value="end">Move to end</option>
+          </select>
+        </label>
       </section>
 
       <section class="card">
@@ -57,7 +65,7 @@
 
       <section class="card">
         <h2>Idle cleanup</h2>
-        <p class="help">Closes idle normal tabs. Idle pinned tabs are discarded (unloaded, not closed). Active and audio-playing tabs are always safe.</p>
+        <p class="help">Closes idle normal tabs. Idle pinned tabs are discarded (unloaded, not closed). Active and audio-playing tabs are always safe. The popup uses this same threshold for manual cleanup.</p>
         <label class="check">
           <input type="checkbox" id="idleEnabled" data-setting="idleEnabled" />
           <span>Enable idle cleanup</span>
@@ -125,10 +133,19 @@
         </div>
         <input type="file" id="importFile" accept="application/json,.json" hidden />
       </section>
+
+      <section class="card">
+        <h2>Diagnostics</h2>
+        <p class="help">Local extension errors and warnings only. URLs and tab contents are not recorded.</p>
+        <div class="row">
+          <button type="button" id="btnShowDiagnostics">Show errors</button>
+          <button type="button" class="danger" id="btnClearDiagnostics">Clear errors</button>
+        </div>
+        <div id="diagnostics" hidden></div>
+      </section>
     </main>
   </div>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
-  <script src="../lib/browser-polyfill.min.js"></script>
   <script src="../data.js"></script>
   <script src="options.js"></script>
 </body>

@@ -1,13 +1,7 @@
-// Tab Hoor — MV3 background (Chrome service worker / Firefox event page)
+// Tab Hoor — Firefox MV3 background
 'use strict';
 
-// Chrome service worker loads this file alone — pull in shared data + the
-// sqlite history store. Firefox lists them before this file in background.scripts.
-if (typeof importScripts === 'function' && typeof TH_DEFAULT_SETTINGS === 'undefined') {
-  importScripts('data.js', 'lib/sql-wasm.js', 'db.js');
-}
-
-const api = globalThis.browser || globalThis.chrome;
+const api = globalThis.browser;
 const ALARM_SAMPLE = 'th-sample';
 const ALARM_IDLE = 'th-idle';
 const IDLE_CHECK_MINUTES = 5; // how often we scan for idle tabs, independent of idleMinutes threshold
@@ -18,6 +12,18 @@ let tabCount = 0;
 let windowCount = 0;
 let countsReady = false;
 let refreshChain = Promise.resolve();
+let historyChain = Promise.resolve();
+let idleSweepChain = Promise.resolve();
+let idleTimestampChain = Promise.resolve();
+
+function queueHistoryJob(job) {
+  historyChain = historyChain
+    .catch(err => {
+      reportError('Tab Hoor history queue', err);
+    })
+    .then(job);
+  return historyChain;
+}
 
 // ── storage ──────────────────────────────────────────────────────────────────
 
@@ -36,26 +42,97 @@ function getSettings() {
   );
 }
 
+const nativeConsoleError = console.error.bind(console);
+const diagnosticChain = { current: Promise.resolve() };
+
+function reportError(context, err, level = 'error') {
+  if (err && !(err instanceof Error) && arguments.length > 2 && arguments[2] instanceof Error) {
+    err = arguments[2];
+  }
+  nativeConsoleError(context, err);
+  const error = err instanceof Error ? err : new Error(String(err));
+  diagnosticChain.current = diagnosticChain.current
+    .catch(() => {})
+    .then(() => thDbInsertDiagnostic({
+      ts: Date.now(),
+      level,
+      context,
+      message: error.message,
+      stack: error.stack || ''
+    }))
+    .catch(storageError => nativeConsoleError('Tab Hoor diagnostics write', storageError));
+}
+
+function actionEventId() {
+  if (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function createAction(entry) {
+  return Object.assign({ ts: Date.now(), eventId: actionEventId() }, entry);
+}
+
+async function journalAction(entry) {
+  const data = await api.storage.local.get('pendingActions');
+  const pending = Array.isArray(data.pendingActions) ? data.pendingActions.slice() : [];
+  if (!pending.some(action => action.eventId === entry.eventId)) pending.push(entry);
+  await api.storage.local.set({ pendingActions: pending });
+}
+
+async function removeJournaledAction(eventId) {
+  const data = await api.storage.local.get('pendingActions');
+  const pending = (Array.isArray(data.pendingActions) ? data.pendingActions : [])
+    .filter(action => action.eventId !== eventId);
+  await api.storage.local.set({ pendingActions: pending });
+}
+
 /** Append one entry to the action log, pruned by the current retention setting. */
-async function logAction(entry) {
+async function logActionNow(entry) {
   const settings = await getSettings();
-  const full = Object.assign({ ts: Date.now() }, entry);
+  const full = Object.assign({ ts: Date.now(), eventId: actionEventId() }, entry);
   const maxAge = thRetentionMs(settings.retention);
   if (settings.historyBackend === 'legacy') {
     const data = await getAll();
     let actions = (data.actions || []).slice();
-    actions.push(full);
+    if (!actions.some(action => action.eventId && action.eventId === full.eventId)) {
+      actions.push(full);
+    }
     if (maxAge !== Infinity) {
       const cutoff = Date.now() - maxAge;
       actions = actions.filter(a => a.ts >= cutoff);
     }
     if (actions.length > 500) actions = actions.slice(-500);
     await setPartial({ actions });
-    return;
+  } else {
+    await thDbInsertAction(full);
+    // No row cap when retention is 'all' — that's the whole point of the sqlite backend.
+    await thDbPruneActions(maxAge !== Infinity ? Date.now() - maxAge : null, maxAge !== Infinity ? 500 : null);
   }
-  await thDbInsertAction(full);
-  // No row cap when retention is 'all' — that's the whole point of the sqlite backend.
-  await thDbPruneActions(maxAge !== Infinity ? Date.now() - maxAge : null, maxAge !== Infinity ? 500 : null);
+  await removeJournaledAction(full.eventId);
+}
+
+function logAction(entry) {
+  return queueHistoryJob(() => logActionNow(entry));
+}
+
+function prepareAction(entry) {
+  const full = createAction(entry);
+  return queueHistoryJob(() => journalAction(full)).then(() => full);
+}
+
+async function replayPendingActions() {
+  const data = await api.storage.local.get('pendingActions');
+  const pending = Array.isArray(data.pendingActions) ? data.pendingActions.slice() : [];
+  for (const action of pending) {
+    try {
+      await logActionNow(action);
+    } catch (err) {
+      reportError('Tab Hoor replay pending action', err);
+      break;
+    }
+  }
 }
 
 // ── toolbar icon ─────────────────────────────────────────────────────────────
@@ -154,7 +231,7 @@ async function queryTabs() {
 /** Serialize refreshes so a stale storage listener can't paint badge=0 after a good query. */
 function refreshCounts() {
   refreshChain = refreshChain.then(doRefreshCounts).catch(err => {
-    console.error('Tab Hoor refreshCounts', err);
+    reportError('Tab Hoor refreshCounts', err);
   });
   return refreshChain;
 }
@@ -196,7 +273,7 @@ async function onCountUpdate() {
 
 // ── history samples ──────────────────────────────────────────────────────────
 
-async function recordSample() {
+async function recordSampleNow() {
   const settings = await getSettings();
   const maxAge = thRetentionMs(settings.retention);
   if (settings.historyBackend === 'legacy') {
@@ -217,6 +294,10 @@ async function recordSample() {
   await thDbPruneSamples(maxAge !== Infinity ? Date.now() - maxAge : null, maxAge !== Infinity ? 50000 : null);
 }
 
+function recordSample() {
+  return queueHistoryJob(() => recordSampleNow());
+}
+
 async function ensureSamplingAlarm(settings) {
   settings = settings || TH_DEFAULT_SETTINGS;
   await api.alarms.clear(ALARM_SAMPLE);
@@ -231,8 +312,9 @@ async function ensureSamplingAlarm(settings) {
 async function dedupeTabs() {
   const closeIds = await findDupeIds();
   if (closeIds.length) {
+    const action = await prepareAction({ kind: 'dedupe', closed: closeIds.length });
     await api.tabs.remove(closeIds);
-    await logAction({ kind: 'dedupe', closed: closeIds.length });
+    await logAction(action);
   }
   return closeIds.length;
 }
@@ -265,33 +347,106 @@ async function findDupeIds() {
 // Tabs that a threshold would catch: idle normal tabs (close) and idle pinned
 // tabs (discard/unload). Active and audio-playing tabs are always safe.
 async function idleCandidates(thresholdMs) {
+  if (!thIsFinitePositiveNumber(thresholdMs)) throw new Error('invalid cleanup age');
   const now = Date.now();
-  const tabs = await api.tabs.query({});
+  const [tabs, data] = await Promise.all([
+    api.tabs.query({}),
+    api.storage.local.get('idleTimestamps')
+  ]);
+  const idleTimestamps = data.idleTimestamps || {};
   const closeIds = [];
   const discardIds = [];
+  let ageUnavailable = 0;
   for (const tab of tabs) {
     if (tab.active || tab.audible) continue;
     if (tab.discarded) continue;
-    const lastAccessed = tab.lastAccessed || 0;
+    const lastAccessed = Number(idleTimestamps[tab.id]);
+    // Never use Firefox's lastAccessed value for cleanup. It is not a reliable
+    // record of the user's tab activation history and can trigger bulk closes.
+    if (!Number.isFinite(lastAccessed) || lastAccessed <= 0) {
+      ageUnavailable++;
+      continue;
+    }
     if (now - lastAccessed < thresholdMs) continue;
     if (tab.pinned) discardIds.push(tab.id);
     else closeIds.push(tab.id);
   }
-  return { closeIds, discardIds };
+  return { closeIds, discardIds, ageUnavailable };
+}
+
+async function initializeIdleTimestamps() {
+  return queueIdleTimestampJob(async () => {
+    const [tabs, data] = await Promise.all([
+      api.tabs.query({}),
+      api.storage.local.get(['idleTimestamps', 'idleTrackingVersion'])
+    ]);
+    const trackingVersion = 2;
+    const timestamps = data.idleTrackingVersion === trackingVersion
+      ? Object.assign({}, data.idleTimestamps || {})
+      : {};
+    const ids = new Set(tabs.map(tab => tab.id));
+    const now = Date.now();
+    for (const tab of tabs) {
+      if (Number.isFinite(Number(timestamps[tab.id])) && Number(timestamps[tab.id]) > 0) continue;
+      timestamps[tab.id] = now;
+    }
+    for (const id of Object.keys(timestamps)) {
+      if (!ids.has(Number(id))) delete timestamps[id];
+    }
+    await api.storage.local.set({ idleTimestamps: timestamps, idleTrackingVersion: trackingVersion });
+  });
+}
+
+async function setIdleTimestamp(tabId, timestamp = Date.now()) {
+  return queueIdleTimestampJob(async () => {
+    const data = await api.storage.local.get('idleTimestamps');
+    const timestamps = Object.assign({}, data.idleTimestamps || {});
+    timestamps[tabId] = timestamp;
+    await api.storage.local.set({ idleTimestamps: timestamps });
+  });
+}
+
+async function removeIdleTimestamp(tabId) {
+  return queueIdleTimestampJob(async () => {
+    const data = await api.storage.local.get('idleTimestamps');
+    const timestamps = Object.assign({}, data.idleTimestamps || {});
+    delete timestamps[tabId];
+    await api.storage.local.set({ idleTimestamps: timestamps });
+  });
+}
+
+function queueIdleTimestampJob(job) {
+  idleTimestampChain = idleTimestampChain
+    .catch(err => {
+      reportError('Tab Hoor idle timestamp queue', err);
+    })
+    .then(job);
+  return idleTimestampChain;
 }
 
 // Shared by the automatic idle-cleanup alarm and the popup's manual button —
 // same sweep, different threshold source and action-log kind.
-async function sweepIdleTabs(thresholdMs, kind) {
+async function sweepIdleTabsNow(thresholdMs, kind) {
   const { closeIds, discardIds } = await idleCandidates(thresholdMs);
+  const action = closeIds.length || discardIds.length
+    ? await prepareAction({ kind, closed: closeIds.length, discarded: discardIds.length })
+    : null;
   if (closeIds.length) await api.tabs.remove(closeIds);
   for (const id of discardIds) {
-    try { await api.tabs.discard(id); } catch (err) { console.error('Tab Hoor discard', err); }
+    try { await api.tabs.discard(id); } catch (err) { reportError('Tab Hoor discard', err); }
   }
-  if (closeIds.length || discardIds.length) {
-    await logAction({ kind, closed: closeIds.length, discarded: discardIds.length });
-  }
+  if (action) await logAction(action);
   return { closed: closeIds.length, discarded: discardIds.length };
+}
+
+function sweepIdleTabs(thresholdMs, kind) {
+  const run = idleSweepChain
+    .catch(err => {
+      reportError('Tab Hoor idle sweep queue', err);
+    })
+    .then(() => sweepIdleTabsNow(thresholdMs, kind));
+  idleSweepChain = run;
+  return run;
 }
 
 async function checkIdleTabs() {
@@ -316,6 +471,17 @@ function thIsGrouped(t) {
   return typeof t.groupId === 'number' && t.groupId !== -1;
 }
 
+async function positionUngroupedTabs(windowId, position) {
+  if (!api.tabGroups || !['start', 'end'].includes(position)) return;
+  const tabs = await api.tabs.query({ windowId });
+  const ungrouped = tabs.filter(tab => !tab.pinned && !thIsGrouped(tab));
+  if (ungrouped.length < 2) return;
+  const index = position === 'start'
+    ? tabs.filter(tab => tab.pinned).length
+    : -1;
+  await api.tabs.move(ungrouped.map(tab => tab.id), { windowId, index });
+}
+
 async function groupTabIfMatch(tab) {
   if (!api.tabGroups || !tab || !tab.url) return;
   const settings = await getSettings();
@@ -337,6 +503,7 @@ async function groupTabIfMatch(tab) {
       .filter(g => g.title === name);
     if (groups.length) {
       await api.tabs.group({ tabIds: [tab.id], groupId: groups[0].id });
+      await positionUngroupedTabs(tab.windowId, settings.groupingUngroupedPosition);
       return;
     }
     const all = await api.tabs.query({ windowId: tab.windowId });
@@ -347,8 +514,9 @@ async function groupTabIfMatch(tab) {
     const tabIds = [tab.id].concat(siblings.map(t => t.id));
     const groupId = await api.tabs.group({ tabIds });
     await api.tabGroups.update(groupId, { title: name });
+    await positionUngroupedTabs(tab.windowId, settings.groupingUngroupedPosition);
   } catch (err) {
-    console.error('Tab Hoor groupTabIfMatch', err);
+    reportError('Tab Hoor groupTabIfMatch', err);
   }
 }
 
@@ -357,7 +525,7 @@ let groupChain = Promise.resolve();
 function queueGroup(tab) {
   groupChain = groupChain
     .then(() => groupTabIfMatch(tab))
-    .catch(err => console.error('Tab Hoor queueGroup', err));
+    .catch(err => reportError('Tab Hoor queueGroup', err));
   return groupChain;
 }
 
@@ -365,6 +533,12 @@ async function groupExistingTabs() {
   if (!api.tabGroups) return;
   const tabs = await api.tabs.query({});
   for (const tab of tabs) await queueGroup(tab);
+  const settings = await getSettings();
+  if (['start', 'end'].includes(settings.groupingUngroupedPosition)) {
+    for (const windowId of [...new Set(tabs.map(tab => tab.windowId))]) {
+      await positionUngroupedTabs(windowId, settings.groupingUngroupedPosition);
+    }
+  }
 }
 
 // Tabs in a window eligible for manual grouping: not pinned, not already grouped, resolvable domain.
@@ -409,6 +583,8 @@ async function groupWindowNow(windowId) {
     }
     grouped += tabIds.length;
   }
+  const settings = await getSettings();
+  await positionUngroupedTabs(windowId, settings.groupingUngroupedPosition);
   return grouped;
 }
 
@@ -424,11 +600,11 @@ async function ungroupWindowNow(windowId) {
   } catch (err) {
     // Some tabGroups implementations don't accept a bulk array — retry one at a time
     // so a single bad id doesn't sink the whole action.
-    console.error('Tab Hoor ungroup (bulk) — retrying individually', err);
+    reportError('Tab Hoor ungroup (bulk) — retrying individually', err);
     let ok = 0;
     for (const id of groupedIds) {
       try { await api.tabs.ungroup(id); ok++; }
-      catch (e) { console.error('Tab Hoor ungroup', id, e); }
+      catch (e) { reportError('Tab Hoor ungroup', id, e); }
     }
     return ok;
   }
@@ -452,34 +628,88 @@ async function findMergeTabs() {
 async function mergeAllWindows() {
   const { activeWindow, otherTabs } = await findMergeTabs();
   if (!activeWindow || !otherTabs.length) return { merged: 0, closed: 0 };
+  const action = await prepareAction({
+    kind: 'merge',
+    tabs: otherTabs.length,
+    windows: new Set(otherTabs.map(tab => tab.windowId)).size
+  });
 
-  // tabs.move does not preserve pinned status — record and re-pin afterward.
-  const pinnedIds = new Set(otherTabs.filter(t => t.pinned).map(t => t.id));
-
-  const tabIds = otherTabs.map(t => t.id);
-  await api.tabs.move(tabIds, { windowId: activeWindow.id, index: -1 });
-
-  for (const id of pinnedIds) {
-    try { await api.tabs.update(id, { pinned: true }); }
-    catch (err) { console.error('Tab Hoor merge pin', err); }
+  // Firefox treats pinned tabs as a separate tab strip. Unpin source tabs
+  // before moving them so a mixed pinned/unpinned move cannot partially fail.
+  const pinnedIds = new Set();
+  const movableIds = [];
+  for (const tab of otherTabs) {
+    if (!tab.pinned) {
+      movableIds.push(tab.id);
+      continue;
+    }
+    try {
+      await api.tabs.update(tab.id, { pinned: false });
+      pinnedIds.add(tab.id);
+      movableIds.push(tab.id);
+    } catch (err) {
+      reportError('Tab Hoor merge unpin', tab.id, err);
+    }
   }
 
-  // Close windows that are now empty. Browsers typically auto-close a window
-  // once its last tab is moved out, so query/remove throwing "no such window"
-  // means it's already gone — that still counts as closed.
+  let merged = 0;
+  if (movableIds.length) {
+    await api.tabs.move(movableIds, { windowId: activeWindow.id, index: -1 });
+    merged += movableIds.length;
+  }
+
+  // Firefox may leave a replacement/new-tab tab behind when every original tab
+  // is moved. Move those residual tabs too, then close the source window.
   const otherWindowIds = [...new Set(otherTabs.map(t => t.windowId))];
   let closed = 0;
   for (const wid of otherWindowIds) {
     try {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const remaining = await api.tabs.query({ windowId: wid });
+        if (!remaining.length) break;
+        const residualIds = [];
+        for (const tab of remaining) {
+          if (tab.pinned) {
+            try {
+              await api.tabs.update(tab.id, { pinned: false });
+              pinnedIds.add(tab.id);
+            } catch (err) {
+              reportError('Tab Hoor merge residual unpin', tab.id, err);
+              continue;
+            }
+          }
+          residualIds.push(tab.id);
+        }
+        if (!residualIds.length) break;
+        await api.tabs.move(residualIds, {
+          windowId: activeWindow.id,
+          index: -1
+        });
+        merged += residualIds.length;
+      }
       const remaining = await api.tabs.query({ windowId: wid });
-      if (remaining.length === 0) await api.windows.remove(wid);
+      if (remaining.length) {
+        reportError('Tab Hoor merge left tabs in source window', wid);
+        continue;
+      }
+      await api.windows.remove(wid);
+      closed++;
     } catch (err) {
-      // Already auto-closed by the browser.
+      // The browser may auto-close the source window after its last tab moves.
+      try {
+        await api.windows.get(wid);
+      } catch (_) {
+        closed++;
+      }
     }
-    closed++;
   }
 
-  return { merged: otherTabs.length, closed };
+  for (const id of pinnedIds) {
+    try { await api.tabs.update(id, { pinned: true }); }
+    catch (err) { reportError('Tab Hoor merge pin', id, err); }
+  }
+
+  return { merged, closed, action };
 }
 
 // ── messaging ────────────────────────────────────────────────────────────────
@@ -510,7 +740,7 @@ api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         });
       })
       .catch(err => {
-        console.error('Tab Hoor GET_STATE', err);
+        reportError('Tab Hoor GET_STATE', err);
         sendResponse(null);
       });
     return true;
@@ -524,14 +754,89 @@ api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           ath: data.ath || 0, athDate: data.athDate || ''
         });
       }
+      if (msg && msg.type === 'GET_DIAGNOSTICS') {
+        thDbGetDiagnostics()
+          .then(rows => sendResponse({ rows }))
+          .catch(err => {
+            nativeConsoleError('Tab Hoor GET_DIAGNOSTICS', err);
+            sendResponse({ rows: [], error: 'Diagnostics unavailable' });
+          });
+        return true;
+      }
+      if (msg && msg.type === 'LOG_DIAGNOSTIC') {
+        reportError(String(msg.context || 'extension'), String(msg.message || ''), String(msg.level || 'error'));
+        sendResponse({ ok: true });
+        return false;
+      }
+      if (msg && msg.type === 'CLEAR_DIAGNOSTICS') {
+        thDbClearDiagnostics()
+          .then(() => sendResponse({ ok: true }))
+          .catch(err => {
+            nativeConsoleError('Tab Hoor CLEAR_DIAGNOSTICS', err);
+            sendResponse({ ok: false });
+          });
+        return true;
+      }
       const [samples, actions, ath, athDate] = await Promise.all([
         thDbGetSamples(null), thDbGetActions(null), thDbGetMeta('ath'), thDbGetMeta('athDate')
       ]);
       sendResponse({ samples, actions, ath: parseInt(ath, 10) || 0, athDate: athDate || '' });
     }).catch(err => {
-      console.error('Tab Hoor GET_HISTORY', err);
+      reportError('Tab Hoor GET_HISTORY', err);
       sendResponse(null);
     });
+    return true;
+  }
+  if (msg && msg.type === 'GET_BACKUP') {
+    getSettings().then(async settings => {
+      const local = await getAll();
+      let samples;
+      let actions;
+      let ath;
+      let athDate;
+      if (settings.historyBackend === 'legacy') {
+        ({ samples = [], actions = [], ath = 0, athDate = '' } = local);
+      } else {
+        [samples, actions, ath, athDate] = await Promise.all([
+          thDbGetSamples(null), thDbGetActions(null), thDbGetMeta('ath'), thDbGetMeta('athDate')
+        ]);
+        ath = parseInt(ath, 10) || 0;
+        athDate = athDate || '';
+      }
+      const data = Object.assign({}, local, { samples, actions, ath, athDate });
+      return sendResponse({ formatVersion: TH_BACKUP_VERSION, exportedAt: new Date().toISOString(), data });
+    }).catch(err => {
+      reportError('Tab Hoor GET_BACKUP', err);
+      sendResponse(null);
+    });
+    return true;
+  }
+  if (msg && msg.type === 'RESTORE_BACKUP') {
+    try {
+      const data = thValidateBackup(msg.backup);
+      getSettings().then(async settings => {
+        const keep = Object.assign({}, data);
+        delete keep.samples;
+        delete keep.actions;
+        delete keep.ath;
+        delete keep.athDate;
+        if (settings.historyBackend === 'legacy') {
+          await setPartial(Object.assign(keep, {
+            samples: data.samples || [], actions: data.actions || [],
+            ath: data.ath || 0, athDate: data.athDate || ''
+          }));
+        } else {
+          await setPartial(keep);
+          await thDbReplaceHistory(data.samples || [], data.actions || [], data.ath || 0, data.athDate || '');
+        }
+        sendResponse({ ok: true });
+      }).catch(err => {
+        reportError('Tab Hoor RESTORE_BACKUP', err);
+        sendResponse({ ok: false, error: err.message });
+      });
+    } catch (err) {
+      sendResponse({ ok: false, error: err.message });
+    }
     return true;
   }
   if (msg && msg.type === 'CLEAR_SAMPLES') {
@@ -569,46 +874,19 @@ api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       .catch(() => sendResponse({ closed: 0 }));
     return true;
   }
-  if (msg && msg.type === 'CLOSE_OLD_TABS') {
-    const cutoff = Date.now() - msg.maxAge;
-    api.tabs.query({}).then(tabs => {
-      const closeIds = [];
-      const discardIds = [];
-      for (const t of tabs) {
-        if (t.active || t.audible || t.discarded) continue;
-        if (t.lastAccessed < cutoff) {
-          if (t.pinned) discardIds.push(t.id);
-          else closeIds.push(t.id);
-        }
-      }
-      if (msg.dryRun) return sendResponse({ closed: closeIds.length, discarded: discardIds.length });
-      
-      return Promise.all([
-        closeIds.length ? api.tabs.remove(closeIds) : Promise.resolve(),
-        ...discardIds.map(id => api.tabs.discard(id).catch(() => {}))
-      ]).then(() => {
-        if (!closeIds.length && !discardIds.length) return;
-        return logAction({ kind: 'old', closed: closeIds.length, discarded: discardIds.length });
-      }).then(() => {
-        sendResponse({ closed: closeIds.length, discarded: discardIds.length });
-      });
-    }).catch(err => {
-      console.error('Tab Hoor CLOSE_OLD_TABS', err);
-      sendResponse(msg.dryRun ? { closed: 0, discarded: 0 } : { closed: 0, discarded: 0 });
-    });
-    return true;
-  }
   if (msg && msg.type === 'IDLE_CLEANUP_NOW') {
     if (msg.dryRun) {
       idleCandidates(msg.maxAge)
-        .then(({ closeIds, discardIds }) => sendResponse({ closed: closeIds.length, discarded: discardIds.length }))
+        .then(({ closeIds, discardIds, ageUnavailable }) => sendResponse({
+          closed: closeIds.length, discarded: discardIds.length, ageUnavailable
+        }))
         .catch(() => sendResponse({ closed: 0, discarded: 0 }));
       return true;
     }
     sweepIdleTabs(msg.maxAge, 'idleManual')
       .then(result => sendResponse(result))
       .catch(err => {
-        console.error('Tab Hoor IDLE_CLEANUP_NOW', err);
+        reportError('Tab Hoor IDLE_CLEANUP_NOW', err);
         sendResponse({ closed: 0, discarded: 0 });
       });
     return true;
@@ -625,7 +903,7 @@ api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       const grouped = await groupWindowNow(windowId);
       sendResponse({ grouped });
     }).catch(err => {
-      console.error('Tab Hoor GROUP_TABS', err);
+      reportError('Tab Hoor GROUP_TABS', err);
       sendResponse(msg.dryRun ? { count: 0 } : { grouped: 0 });
     });
     return true;
@@ -641,7 +919,7 @@ api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       const ungrouped = await ungroupWindowNow(windowId);
       sendResponse({ ungrouped });
     }).catch(err => {
-      console.error('Tab Hoor UNGROUP_TABS', err);
+      reportError('Tab Hoor UNGROUP_TABS', err);
       sendResponse(msg.dryRun ? { count: 0 } : { ungrouped: 0 });
     });
     return true;
@@ -657,10 +935,10 @@ api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       return true;
     }
     mergeAllWindows().then(async result => {
-      if (result.merged) await logAction({ kind: 'merge', tabs: result.merged, windows: result.closed });
+      if (result.merged) await logAction(result.action);
       sendResponse({ merged: result.merged, closed: result.closed });
     }).catch(err => {
-      console.error('Tab Hoor merge windows', err);
+      reportError('Tab Hoor merge windows', err);
       sendResponse({ merged: 0, closed: 0 });
     });
     return true;
@@ -669,8 +947,15 @@ api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
 // ── events ───────────────────────────────────────────────────────────────────
 
-api.tabs.onCreated.addListener(tab => { refreshCounts(); queueGroup(tab); });
-api.tabs.onRemoved.addListener(() => { refreshCounts(); });
+api.tabs.onCreated.addListener(tab => {
+  refreshCounts();
+  queueGroup(tab);
+  setIdleTimestamp(tab.id).catch(err => reportError('Tab Hoor idle timestamp create', err));
+});
+api.tabs.onRemoved.addListener(tabId => {
+  refreshCounts();
+  removeIdleTimestamp(tabId).catch(err => reportError('Tab Hoor idle timestamp remove', err));
+});
 api.tabs.onReplaced.addListener(() => { refreshCounts(); });
 api.windows.onCreated.addListener(() => { refreshCounts(); });
 api.windows.onRemoved.addListener(() => { refreshCounts(); });
@@ -681,6 +966,7 @@ api.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 });
 
 api.tabs.onActivated.addListener(({ tabId }) => {
+  setIdleTimestamp(tabId).catch(err => reportError('Tab Hoor idle timestamp activate', err));
   api.tabs.get(tabId).then(queueGroup).catch(() => {});
 });
 
@@ -690,7 +976,7 @@ api.alarms.onAlarm.addListener(alarm => {
     queryTabs().then(() => recordSample());
   }
   if (alarm.name === ALARM_IDLE) {
-    checkIdleTabs().catch(err => console.error('Tab Hoor checkIdleTabs', err));
+    checkIdleTabs().catch(err => reportError('Tab Hoor checkIdleTabs', err));
   }
 });
 
@@ -703,53 +989,69 @@ api.storage.onChanged.addListener((changes, area) => {
     // Never badge from stale in-memory count (was painting "0" on settings save).
     refreshCounts();
     const old = changes.settings.oldValue || {};
-    if (s.groupingEnabled && (!old.groupingEnabled || old.groupingAutoMinTabs !== s.groupingAutoMinTabs)) {
-      groupExistingTabs().catch(err => console.error('Tab Hoor groupExistingTabs', err));
+    if (s.groupingEnabled && (!old.groupingEnabled ||
+        old.groupingAutoMinTabs !== s.groupingAutoMinTabs ||
+        old.groupingUngroupedPosition !== s.groupingUngroupedPosition)) {
+      groupExistingTabs().catch(err => reportError('Tab Hoor groupExistingTabs', err));
     }
     const oldBackend = old.historyBackend || TH_DEFAULT_SETTINGS.historyBackend;
     if (s.historyBackend !== oldBackend) {
-      switchHistoryBackend(s.historyBackend).catch(err => console.error('Tab Hoor switchHistoryBackend', err));
+      switchHistoryBackendQueued(s.historyBackend).catch(err => reportError('Tab Hoor switchHistoryBackend', err));
     }
   }
 });
 
 // Best-effort sync so switching backends doesn't strand data on the side you're leaving.
 async function switchHistoryBackend(newBackend) {
+  const settings = await getSettings();
+  const maxAge = thRetentionMs(settings.retention);
   if (newBackend === 'sqlite') {
     const data = await getAll();
     await thDbImportFromLocal(data.samples || [], data.actions || [], data.ath || 0, data.athDate || '');
+    await thDbPruneSamples(maxAge !== Infinity ? Date.now() - maxAge : null, maxAge !== Infinity ? 50000 : null);
+    await thDbPruneActions(maxAge !== Infinity ? Date.now() - maxAge : null, maxAge !== Infinity ? 500 : null);
   } else {
     const [samples, actions, ath, athDate] = await Promise.all([
       thDbGetSamples(null), thDbGetActions(null), thDbGetMeta('ath'), thDbGetMeta('athDate')
     ]);
     // Legacy storage.local has no db behind it — cap to the same safety nets recordSample/logAction use.
+    const cutoff = maxAge === Infinity ? 0 : Date.now() - maxAge;
     await setPartial({
-      samples: samples.length > 50000 ? samples.slice(-50000) : samples,
-      actions: actions.length > 500 ? actions.slice(-500) : actions,
+      samples: samples.filter(s => s.ts >= cutoff).slice(-50000),
+      actions: actions.filter(a => a.ts >= cutoff).slice(-500),
       ath: parseInt(ath, 10) || 0,
       athDate: athDate || ''
     });
   }
+
+}
+
+function switchHistoryBackendQueued(newBackend) {
+  return queueHistoryJob(() => switchHistoryBackend(newBackend));
 }
 
 api.runtime.onInstalled.addListener(async () => {
+  await initializeIdleTimestamps();
   const data = await getAll();
   if (!data.settings) await setPartial({ settings: TH_DEFAULT_SETTINGS });
   if (!data.installedDate) await setPartial({ installedDate: new Date().toISOString() });
   await ensureSamplingAlarm(Object.assign({}, TH_DEFAULT_SETTINGS, data.settings || {}));
   await ensureIdleAlarm(Object.assign({}, TH_DEFAULT_SETTINGS, data.settings || {}));
   await refreshCounts();
+  await replayPendingActions();
   setTimeout(() => recordSample(), 1500);
-  groupExistingTabs().catch(err => console.error('Tab Hoor groupExistingTabs', err));
+  groupExistingTabs().catch(err => reportError('Tab Hoor groupExistingTabs', err));
 });
 
 api.runtime.onStartup.addListener(async () => {
+  await initializeIdleTimestamps();
   const data = await getAll();
   await ensureSamplingAlarm(Object.assign({}, TH_DEFAULT_SETTINGS, data.settings || {}));
   await ensureIdleAlarm(Object.assign({}, TH_DEFAULT_SETTINGS, data.settings || {}));
   await refreshCounts();
+  await replayPendingActions();
   setTimeout(() => recordSample(), 1500);
-  groupExistingTabs().catch(err => console.error('Tab Hoor groupExistingTabs', err));
+  groupExistingTabs().catch(err => reportError('Tab Hoor groupExistingTabs', err));
 });
 
 // Drop stored state from removed features (achievements, ranks). Idempotent.
@@ -769,8 +1071,10 @@ function migrateLegacy(data) {
 
 // Cold start (service worker wake)
 getAll().then(data => {
-  migrateLegacy(data).catch(err => console.error('Tab Hoor migrateLegacy', err));
+  initializeIdleTimestamps().catch(err => reportError('Tab Hoor idle timestamp initialize', err));
+  migrateLegacy(data).catch(err => reportError('Tab Hoor migrateLegacy', err));
   ensureSamplingAlarm(Object.assign({}, TH_DEFAULT_SETTINGS, data.settings || {}));
   ensureIdleAlarm(Object.assign({}, TH_DEFAULT_SETTINGS, data.settings || {}));
   refreshCounts();
+  replayPendingActions().catch(err => reportError('Tab Hoor replay pending actions', err));
 });

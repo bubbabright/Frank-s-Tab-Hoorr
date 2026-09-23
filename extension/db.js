@@ -36,7 +36,8 @@ async function thIdbSetBlob(bytes) {
 
 const TH_SCHEMA = `
   CREATE TABLE IF NOT EXISTS samples (ts INTEGER PRIMARY KEY, t INTEGER NOT NULL, w INTEGER NOT NULL);
-  CREATE TABLE IF NOT EXISTS actions (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, kind TEXT NOT NULL, closed INTEGER DEFAULT 0, discarded INTEGER DEFAULT 0, tabs INTEGER, windows INTEGER);
+  CREATE TABLE IF NOT EXISTS actions (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, kind TEXT NOT NULL, closed INTEGER DEFAULT 0, discarded INTEGER DEFAULT 0, tabs INTEGER, windows INTEGER, import_key TEXT);
+  CREATE TABLE IF NOT EXISTS diagnostics (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, level TEXT NOT NULL, context TEXT NOT NULL, message TEXT NOT NULL, stack TEXT);
   CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 `;
 
@@ -44,11 +45,16 @@ let thDbPromise = null;
 let thSaveChain = Promise.resolve();
 
 function thRuntime() {
-  return globalThis.browser || globalThis.chrome;
+  return globalThis.browser;
 }
 
 async function thGetDb() {
-  if (!thDbPromise) thDbPromise = thOpenDb();
+  if (!thDbPromise) {
+    thDbPromise = thOpenDb().catch(err => {
+      thDbPromise = null;
+      throw err;
+    });
+  }
   return thDbPromise;
 }
 
@@ -57,26 +63,32 @@ async function thOpenDb() {
   const blob = await thIdbGetBlob();
   const db = blob ? new SQL.Database(blob) : new SQL.Database();
   db.run(TH_SCHEMA);
+  const columns = thRowsToObjects(db, 'PRAGMA table_info(actions)');
+  if (!columns.some(c => c.name === 'import_key')) db.run('ALTER TABLE actions ADD COLUMN import_key TEXT');
+  db.run('CREATE UNIQUE INDEX IF NOT EXISTS actions_import_key ON actions(import_key) WHERE import_key IS NOT NULL');
   if (!blob) await thMigrateLegacy(db);
   return db;
 }
 
 // Merges storage.local-shaped rows into an open db. Shared by the one-time
 // migration below and the explicit legacy->sqlite backend switch.
-function thImportRows(db, samples, actions, ath, athDate) {
+function thImportRows(db, samples, actions, ath, athDate, inTransaction = false) {
   if (samples.length) {
-    db.run('BEGIN');
+    if (!inTransaction) db.run('BEGIN');
     const stmt = db.prepare('INSERT OR IGNORE INTO samples (ts, t, w) VALUES (?, ?, ?)');
     samples.forEach(s => stmt.run([s.ts, s.t, s.w || 0]));
     stmt.free();
-    db.run('COMMIT');
+    if (!inTransaction) db.run('COMMIT');
   }
   if (actions.length) {
-    db.run('BEGIN');
-    const stmt = db.prepare('INSERT INTO actions (ts, kind, closed, discarded, tabs, windows) VALUES (?, ?, ?, ?, ?, ?)');
-    actions.forEach(a => stmt.run([a.ts, a.kind, a.closed || 0, a.discarded || 0, a.tabs || 0, a.windows || 0]));
+    if (!inTransaction) db.run('BEGIN');
+    const stmt = db.prepare('INSERT OR IGNORE INTO actions (ts, kind, closed, discarded, tabs, windows, import_key) VALUES (?, ?, ?, ?, ?, ?, ?)');
+    actions.forEach(a => {
+      const key = JSON.stringify([a.ts, a.kind, a.closed || 0, a.discarded || 0, a.tabs || 0, a.windows || 0]);
+      stmt.run([a.ts, a.kind, a.closed || 0, a.discarded || 0, a.tabs || 0, a.windows || 0, key]);
+    });
     stmt.free();
-    db.run('COMMIT');
+    if (!inTransaction) db.run('COMMIT');
   }
   if (ath) db.run('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', ['ath', String(ath)]);
   if (athDate) db.run('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', ['athDate', athDate]);
@@ -104,9 +116,28 @@ async function thDbImportFromLocal(samples, actions, ath, athDate) {
   await thPersist(db);
 }
 
+async function thDbReplaceHistory(samples, actions, ath, athDate) {
+  const db = await thGetDb();
+  db.run('BEGIN');
+  try {
+    db.run('DELETE FROM samples');
+    db.run('DELETE FROM actions');
+    thImportRows(db, samples || [], actions || [], ath || 0, athDate || '', true);
+    db.run('COMMIT');
+  } catch (err) {
+    db.run('ROLLBACK');
+    throw err;
+  }
+  await thPersist(db);
+}
+
 // Debounced-by-chaining export+save so concurrent writes serialize instead of racing.
 function thPersist(db) {
-  thSaveChain = thSaveChain.then(() => thIdbSetBlob(db.export()));
+  thSaveChain = thSaveChain
+    .catch(err => {
+      console.error('Tab Hoor SQLite save queue', err);
+    })
+    .then(() => thIdbSetBlob(db.export()));
   return thSaveChain;
 }
 
@@ -144,8 +175,9 @@ async function thDbGetSamples(sinceTs) {
 async function thDbInsertAction(entry) {
   const db = await thGetDb();
   db.run(
-    'INSERT INTO actions (ts, kind, closed, discarded, tabs, windows) VALUES (?, ?, ?, ?, ?, ?)',
-    [entry.ts, entry.kind, entry.closed || 0, entry.discarded || 0, entry.tabs || 0, entry.windows || 0]
+    'INSERT OR IGNORE INTO actions (ts, kind, closed, discarded, tabs, windows, import_key) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [entry.ts, entry.kind, entry.closed || 0, entry.discarded || 0, entry.tabs || 0, entry.windows || 0,
+      entry.eventId || null]
   );
   await thPersist(db);
 }
@@ -164,6 +196,31 @@ async function thDbGetActions(sinceTs) {
   return sinceTs != null
     ? thRowsToObjects(db, 'SELECT * FROM actions WHERE ts >= ? ORDER BY ts ASC', [sinceTs])
     : thRowsToObjects(db, 'SELECT * FROM actions ORDER BY ts ASC');
+}
+
+async function thDbInsertDiagnostic(entry) {
+  const db = await thGetDb();
+  db.run(
+    'INSERT INTO diagnostics (ts, level, context, message, stack) VALUES (?, ?, ?, ?, ?)',
+    [entry.ts, entry.level, entry.context, entry.message, entry.stack || null]
+  );
+  await thPersist(db);
+  db.run('DELETE FROM diagnostics WHERE id NOT IN (SELECT id FROM diagnostics ORDER BY ts DESC, id DESC LIMIT 200)');
+  await thPersist(db);
+}
+
+async function thDbGetDiagnostics(limit = 200) {
+  const db = await thGetDb();
+  return thRowsToObjects(db,
+    'SELECT id, ts, level, context, message, stack FROM diagnostics ORDER BY ts DESC, id DESC LIMIT ?',
+    [limit]
+  );
+}
+
+async function thDbClearDiagnostics() {
+  const db = await thGetDb();
+  db.run('DELETE FROM diagnostics');
+  await thPersist(db);
 }
 
 async function thDbClearSamples() {
@@ -196,10 +253,14 @@ if (typeof globalThis !== 'undefined') {
   globalThis.thDbGetSamples = thDbGetSamples;
   globalThis.thDbInsertAction = thDbInsertAction;
   globalThis.thDbGetActions = thDbGetActions;
+  globalThis.thDbInsertDiagnostic = thDbInsertDiagnostic;
+  globalThis.thDbGetDiagnostics = thDbGetDiagnostics;
+  globalThis.thDbClearDiagnostics = thDbClearDiagnostics;
   globalThis.thDbPruneActions = thDbPruneActions;
   globalThis.thDbClearSamples = thDbClearSamples;
   globalThis.thDbClearActions = thDbClearActions;
   globalThis.thDbGetMeta = thDbGetMeta;
   globalThis.thDbSetMeta = thDbSetMeta;
   globalThis.thDbImportFromLocal = thDbImportFromLocal;
+  globalThis.thDbReplaceHistory = thDbReplaceHistory;
 }

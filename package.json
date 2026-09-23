@@ -1,11 +1,26 @@
 {
   "name": "tab-hoor",
-  "version": "0.9.3",
+  "version": "0.9.6",
   "private": true,
-  "description": "Tab Hoor browser extension (Firefox + Chrome)",
+  "type": "module",
+  "description": "Tab Hoor Firefox extension",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
-    "build": "./scripts/build.sh",
-    "install:firefox": "./scripts/install-firefox.sh",
-    "install:chrome": "./scripts/install-chrome.sh"
+    "build": "bash ./scripts/build.sh",
+    "check:manifest": "node ./scripts/check-manifest.mjs",
+    "check:syntax": "node ./scripts/check-syntax.mjs",
+    "format": "prettier --write package.json scripts/*.mjs extension/manifest.firefox.json",
+    "format:check": "prettier --check package.json scripts/*.mjs extension/manifest.firefox.json",
+    "lint": "eslint scripts/*.mjs",
+    "test": "node --test test/*.test.js",
+    "unit-check": "npm test && npm run check:syntax && npm run check:manifest",
+    "check": "npm run format:check && npm run lint && npm run unit-check && npm run build"
+  },
+  "devDependencies": {
+    "eslint": "9.38.0",
+    "prettier": "3.6.2"
   }
 }

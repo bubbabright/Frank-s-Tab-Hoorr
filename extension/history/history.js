@@ -1,7 +1,7 @@
 // Tab Hoor — history page
 'use strict';
 
-const api = globalThis.browser || globalThis.chrome;
+const api = globalThis.browser;
 
 // Small DOM builders so rendering never touches innerHTML with interpolated values.
 function h(tag, attrs, children) {
@@ -301,7 +301,7 @@ function actionTime(ts) {
 
 /**
  * Action log: what Tab Hoor did on its own (idle cleanup) or on request
- * (dedupe, close old tabs, merge), and how many tabs each one removed.
+ * (dedupe, idle cleanup, merge), and how many tabs each one removed.
  */
 function renderActions() {
   const titleEl = document.getElementById('actionTitle');
@@ -315,7 +315,7 @@ function renderActions() {
 
   const list = document.getElementById('actionList');
   if (!rows.length) {
-    emptyState(list, 'No actions recorded yet. Close Dupes, Close Old Tabs, Merge Windows and idle cleanup are logged here.');
+    emptyState(list, 'No actions recorded yet. Close Dupes, Idle Cleanup, Merge Windows and grouping actions are logged here.');
     return;
   }
 

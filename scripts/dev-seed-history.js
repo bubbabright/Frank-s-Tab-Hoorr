@@ -1,9 +1,7 @@
 // Tab Hoor — dev-only seed script. NOT shipped in the build (scripts/ isn't
 // copied by build.sh). Populates storage.local's legacy samples/actions/ath
 // arrays with 90 days of synthetic data, so you can flip the "Storage engine"
-// setting from legacy -> sqlite in options and confirm switchHistoryBackend()
-// actually migrates it (background.js's storage.onChanged listener calls
-// thDbImportFromLocal on that transition).
+// setting from legacy -> sqlite in options and confirm the migration.
 //
 // How to run: open any Tab Hoor extension page (options page is easiest —
 // popup -> gear icon), open its devtools console, paste this whole script,
@@ -11,7 +9,7 @@
 // switch it to SQLite (or toggle legacy -> sqlite -> legacy if it's already
 // sqlite) to trigger the migration, then check the history page.
 (async () => {
-  const api = globalThis.browser || globalThis.chrome;
+  const api = globalThis.browser;
   const DAYS = 90;
   const STEP_MIN = 15; // one sample every 15 minutes
   const now = Date.now();
@@ -27,12 +25,15 @@
     samples.push({ ts, t, w });
   }
 
-  const kinds = ['dedupe', 'old', 'merge', 'idle'];
+  const kinds = ['dedupe', 'merge', 'idle', 'idleManual'];
   const actions = [];
   for (let i = 0; i < 120; i++) {
     const ts = now - Math.floor(Math.random() * DAYS * 86400000);
     const kind = kinds[Math.floor(Math.random() * kinds.length)];
-    const entry = { ts, kind };
+    const eventId = globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function'
+      ? globalThis.crypto.randomUUID()
+      : `${ts}-${i}`;
+    const entry = { ts, kind, eventId };
     if (kind === 'merge') {
       entry.tabs = 1 + Math.floor(Math.random() * 8);
       entry.windows = 1 + Math.floor(Math.random() * 3);

@@ -28,28 +28,18 @@
         <button type="button" id="btnUngroup">Ungroup Tabs</button>
       </div>
       <div class="closer-row">
-        <select id="ageThreshold" title="Close tabs not used for">
-          <option value="3600000">1 hour</option>
-          <option value="21600000">6 hours</option>
-          <option value="43200000">12 hours</option>
-          <option value="86400000" selected>24 hours</option>
-          <option value="172800000">48 hours</option>
-          <option value="604800000">7 days</option>
-        </select>
-        <button type="button" id="closeOldTabs">Close Old Tabs</button>
-      </div>
-      <div class="closer-row">
+        <label class="sr-only" for="idleThreshold">Idle cleanup threshold</label>
         <input type="text" id="idleThreshold" value="30m" placeholder="30m, 1h, 90m, 1d" inputmode="text" />
         <span class="help-icon" tabindex="0" title="Closes idle normal tabs right now, using the time you typed. Idle pinned tabs are discarded (unloaded, not closed) instead of closed. Active and audio-playing tabs are always safe. Formats: 30m, 1h, 90m, 1d, 2h30m.">?</span>
         <button type="button" id="btnIdleCleanup">Idle Cleanup</button>
       </div>
     </section>
 
-    <div class="load-error" id="loadError" hidden>Couldn't load stats. Close and reopen the popup.</div>
+    <div class="load-error" id="loadError" role="alert" hidden>Couldn't load stats. Close and reopen the popup.</div>
 
     <section class="score-section">
       <div class="score-main">
-        <div class="tab-count" id="tabCount">—</div>
+        <div class="tab-count" id="tabCount" aria-live="polite">—</div>
         <div class="score-side">
           <div class="count-label">tabs open</div>
           <div class="window-count" id="windowCount"></div>
@@ -70,7 +60,6 @@
       </div>
     </section>
   </div>
-  <script src="../lib/browser-polyfill.min.js"></script>
   <script src="../data.js"></script>
   <script src="popup.js"></script>
 </body>

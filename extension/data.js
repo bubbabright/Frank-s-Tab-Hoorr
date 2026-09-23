@@ -15,17 +15,67 @@ const TH_DEFAULT_SETTINGS = {
   historyBackend: 'sqlite', // sqlite (years, wasm-backed) | legacy (storage.local arrays, capped ~6mo)
   idleEnabled: false,   // auto-close/discard idle tabs (ported from FFTabClose)
   idleMinutes: 30,
+  idleTimestamps: {},
   groupingEnabled: false, // auto tab grouping by domain, Firefox only (ported from firefox-auto-tab-grouping)
   groupingAutoMinTabs: 2, // minimum same-domain tabs before auto mode groups them
+  groupingUngroupedPosition: 'leave', // leave | start | end
   dedupeIgnoreHash: true,   // treat http://x.com/ and http://x.com/#foo as the same tab
   dedupeIgnoreQuery: false, // treat http://x.com/?a=1 and http://x.com/?a=2 as the same tab
   dedupeIgnoreWww: false,   // treat http://www.x.com and http://x.com as the same tab
   dedupeCaseInsensitive: false,
   dedupeKeepPinned: true,   // prefer keeping a pinned tab over a non-pinned duplicate
   dedupeKeepActive: true,    // prefer keeping the active tab over a background duplicate
-  popupAgeThreshold: 86400000, // Default 24h for manual popup action
-  popupIdleThreshold: '30m'    // Default for the popup's manual idle-cleanup text box
 };
+
+const TH_BACKUP_VERSION = 1;
+const TH_MAX_BACKUP_ROWS = 100000;
+
+function thIsFinitePositiveNumber(value) {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0;
+}
+
+function thValidateHistoryRows(samples, actions) {
+  if (!Array.isArray(samples) || !Array.isArray(actions)) throw new Error('history rows must be lists');
+  if (samples.length > TH_MAX_BACKUP_ROWS || actions.length > TH_MAX_BACKUP_ROWS) {
+    throw new Error('backup contains too many history rows');
+  }
+  for (const row of samples) {
+    if (!row || Object.keys(row).some(key => !['ts', 't', 'w'].includes(key)) ||
+        !Number.isSafeInteger(row.ts) || row.ts <= 0 ||
+        !Number.isSafeInteger(row.t) || row.t < 0 ||
+        !Number.isSafeInteger(row.w) || row.w < 0) {
+      throw new Error('invalid sample row');
+    }
+  }
+  for (const row of actions) {
+    if (!row || Object.keys(row).some(key => !['ts', 'kind', 'closed', 'discarded', 'tabs', 'windows'].includes(key)) ||
+        !Number.isSafeInteger(row.ts) || row.ts <= 0 ||
+        typeof row.kind !== 'string' || row.kind.length === 0 || row.kind.length > 64 ||
+        !Number.isSafeInteger(row.closed || 0) || row.closed < 0 ||
+        !Number.isSafeInteger(row.discarded || 0) || row.discarded < 0 ||
+        !Number.isSafeInteger(row.tabs || 0) || row.tabs < 0 ||
+        !Number.isSafeInteger(row.windows || 0) || row.windows < 0) {
+      throw new Error('invalid action row');
+    }
+  }
+}
+
+function thValidateBackup(payload) {
+  if (!payload || payload.formatVersion !== TH_BACKUP_VERSION ||
+      !payload.data || typeof payload.data !== 'object' || Array.isArray(payload.data)) {
+    throw new Error('unsupported backup format');
+  }
+  const data = payload.data;
+  thValidateHistoryRows(data.samples || [], data.actions || []);
+  if ('ath' in data && (!Number.isSafeInteger(data.ath) || data.ath < 0)) {
+    throw new Error('invalid all-time high');
+  }
+  if ('athDate' in data && typeof data.athDate !== 'string') throw new Error('invalid all-time high date');
+  if ('settings' in data && (!data.settings || typeof data.settings !== 'object' || Array.isArray(data.settings))) {
+    throw new Error('invalid settings');
+  }
+  return data;
+}
 
 // Colour tone for a tab count (drives badge, popup count and sparkline colour).
 function thTone(n) {
@@ -80,8 +130,10 @@ function thDomainOf(url) {
   const host = u.hostname.toLowerCase();
   if (!host || !host.includes('.') || /^[\d.]+$/.test(host) || host.includes(':')) return host || null;
   const labels = host.split('.');
-  const keep = TH_TWO_LEVEL_SUFFIXES.has(labels.slice(-2).join('.')) ? 3 : 2;
-  return labels.slice(-keep).join('.');
+  if (labels.length < 2) return host || null;
+  const s2 = labels.slice(-2).join('.');
+  const keep = TH_TWO_LEVEL_SUFFIXES.has(s2) ? 3 : 2;
+  return labels.length >= keep ? labels.slice(-keep).join('.') : host;
 }
 
 // Builds a dedupe match key for a tab URL per the dedupe* settings toggles.
@@ -108,7 +160,6 @@ const TH_ACTION_KINDS = {
   idle:       { label: 'Idle cleanup',        auto: true },
   idleManual: { label: 'Idle cleanup',        auto: false },
   dedupe:     { label: 'Duplicates closed',   auto: false },
-  old:        { label: 'Old tabs closed',     auto: false },
   merge:      { label: 'Windows merged',      auto: false }
 };
 
@@ -143,6 +194,8 @@ if (typeof globalThis !== 'undefined') {
   globalThis.TH_ACTION_KINDS = TH_ACTION_KINDS;
   globalThis.thParseDuration = thParseDuration;
   globalThis.TH_DEFAULT_SETTINGS = TH_DEFAULT_SETTINGS;
+  globalThis.TH_BACKUP_VERSION = TH_BACKUP_VERSION;
+  globalThis.thValidateBackup = thValidateBackup;
   globalThis.thTone = thTone;
   globalThis.thFormatDate = thFormatDate;
   globalThis.thRetentionMs = thRetentionMs;

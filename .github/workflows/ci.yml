@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run format:check
+      - run: npm run lint
+      - run: npm run check:syntax
+      - run: npm run check:manifest
+      - run: npm run build
+      - name: Verify release metadata
+        run: |
+          test -s dist/tab-hoor-*-firefox.xpi
+          test -s dist/tab-hoor-*-source.tar.gz
+          test -s dist/tab-hoor-*-SHA256SUMS
+          (cd dist && sha256sum --check tab-hoor-*-SHA256SUMS)

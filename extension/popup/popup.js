@@ -1,7 +1,7 @@
 // Tab Hoor — popup
 'use strict';
 
-const api = globalThis.browser || globalThis.chrome;
+const api = globalThis.browser;
 
 function toneClass(tone) {
   if (tone === 'green') return 'green';
@@ -74,19 +74,17 @@ function refresh() {
     render(data);
   }).catch(err => {
     console.error(err);
+    api.runtime.sendMessage({
+      type: 'LOG_DIAGNOSTIC',
+      context: 'Tab Hoor popup load',
+      message: err && err.stack || String(err)
+    }).catch(() => {});
     document.getElementById('loadError').hidden = false;
   });
 }
 
 // Each action button shows how many tabs/windows it would touch, so nothing runs blind.
 const COUNT_BUTTONS = [
-  {
-    id: 'closeOldTabs',
-    fallback: 'Close Old Tabs',
-    query: () => ({ type: 'CLOSE_OLD_TABS', maxAge: parseInt(document.getElementById('ageThreshold').value, 10), dryRun: true }),
-    count: r => (r.closed || 0) + (r.discarded || 0),
-    label: n => (n ? `Close ${n} Old` : 'No Old Tabs')
-  },
   {
     id: 'lnkDupes',
     fallback: 'Close Dupes',
@@ -124,7 +122,10 @@ const COUNT_BUTTONS = [
       return ms ? { type: 'IDLE_CLEANUP_NOW', maxAge: ms, dryRun: true } : null;
     },
     count: r => (r.closed || 0) + (r.discarded || 0),
-    label: n => (n ? `Clean ${n} Idle` : 'No Idle Tabs'),
+    label: (n, r) => {
+      if (n) return `Clean ${n} Idle`;
+      return r.ageUnavailable ? 'Age Unavailable' : 'No Idle Tabs';
+    },
     invalidLabel: 'Invalid Time'
   }
 ];
@@ -149,7 +150,7 @@ function updateCounts() {
       return;
     }
     const n = b.count(r) || 0;
-    btn.textContent = b.label(n);
+    btn.textContent = b.label(n, r);
     btn.disabled = n === 0;
     btn.title = b.title && n ? b.title(r) : '';
   }));
@@ -163,6 +164,11 @@ async function runAction(btn, message, busy, doneLabel) {
     btn.textContent = doneLabel(await api.runtime.sendMessage(message));
   } catch (err) {
     console.error(err);
+    api.runtime.sendMessage({
+      type: 'LOG_DIAGNOSTIC',
+      context: 'Tab Hoor popup action',
+      message: err && err.stack || String(err)
+    }).catch(() => {});
     btn.textContent = 'Failed';
   }
   await refresh();
@@ -173,11 +179,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('version').textContent = 'v' + api.runtime.getManifest().version;
   
   const { settings } = await api.storage.local.get('settings');
-  if (settings && settings.popupAgeThreshold) {
-    document.getElementById('ageThreshold').value = String(settings.popupAgeThreshold);
-  }
-  if (settings && settings.popupIdleThreshold) {
-    document.getElementById('idleThreshold').value = settings.popupIdleThreshold;
+  if (settings && Number.isFinite(settings.idleMinutes) && settings.idleMinutes > 0) {
+    document.getElementById('idleThreshold').value = `${settings.idleMinutes}m`;
   }
 
   if (api.tabGroups) document.getElementById('groupRow').hidden = false;
@@ -213,30 +216,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       r => (r && r.ungrouped) ? `Ungrouped ${r.ungrouped}` : 'No Groups');
   });
 
-  document.getElementById('ageThreshold').addEventListener('change', async (e) => {
-    const ms = parseInt(e.target.value, 10);
-    const { settings } = await api.storage.local.get('settings');
-    const next = Object.assign({}, settings || {});
-    next.popupAgeThreshold = ms;
-    await api.storage.local.set({ settings: next });
-    updateCounts();
-  });
-
-  document.getElementById('closeOldTabs').addEventListener('click', e => {
-    const maxAge = parseInt(document.getElementById('ageThreshold').value, 10);
-    runAction(e.currentTarget, { type: 'CLOSE_OLD_TABS', maxAge }, 'Closing…',
-      r => {
-        if (!r) return 'None Found';
-        const closed = r.closed || 0, discarded = r.discarded || 0;
-        if (!closed && !discarded) return 'None Found';
-        return discarded ? `Closed ${closed}, unloaded ${discarded}` : `Closed ${closed}`;
-      });
-  });
-
   document.getElementById('idleThreshold').addEventListener('change', async e => {
     const { settings } = await api.storage.local.get('settings');
     const next = Object.assign({}, settings || {});
-    next.popupIdleThreshold = e.target.value;
+    const ms = thParseDuration(e.target.value);
+    if (ms) next.idleMinutes = Math.max(1, Math.round(ms / 60000));
     await api.storage.local.set({ settings: next });
     updateCounts();
   });

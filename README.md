@@ -16,9 +16,17 @@
 ## 📂 Auto Tab Grouping
 *   Automatically groups tabs by domain as you browse.
 *   Set a minimum tab threshold (e.g., only group a site once you have 3+ tabs of it; set to 1 to group every domain immediately).
-*   Uses Firefox's native `tabGroups` API — not available on Chrome, which is why this extension targets Firefox only.
+*   Uses Firefox's native `tabGroups` API.
 
 ## 🔒 Privacy & Data
 *   **Counts only. No URLs. All local.** We do not store what sites you visit, and no data ever leaves your browser.
 *   **Full Control:** Export your settings as JSON to back them up, or import them later. Clear your history at any time.
 *   **Custom Polling:** Choose how often tab counts are sampled, from "every tab change" (heavy use) to "every 15 minutes" (light use) to keep storage usage low.
+
+## ⚙️ How to Test
+
+To load synthetic history for testing, open the extension's options page,
+open its Firefox Developer Tools console, paste the contents of
+`scripts/dev-seed-history.js`, and press Enter. The script writes 90 days of
+counts and current-format action records to local storage. Switch the History
+storage engine from Legacy to SQLite afterward if you want to test migration.
