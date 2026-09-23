@@ -1,7 +1,5 @@
 # Frank's Tab Hoor
 
-![Logo](tab-hoor-logo.jpeg)
-
 **Frank's Tab Hoor** is a local tab management tool for people who hoard tabs, built for Firefox. Named after a certain Always Sunny character's pronunciation of "whore," this extension helps you face your problem, track your habits, and clean up your browser without sacrificing your privacy.
 
 ## 📊 Track Your Habit
